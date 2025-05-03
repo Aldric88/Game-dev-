@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'reset_password_page.dart';
 import '../widgets/feature_item.dart';
+import 'dashboard.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -20,6 +21,10 @@ class _LoginPageState extends State<LoginPage> {
       String email = _emailController.text;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Logging in with $email')),
+      );
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (context) => const DashboardPage()),
       );
     }
   }

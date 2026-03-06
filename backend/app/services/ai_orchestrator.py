@@ -395,51 +395,265 @@ class AIOrchestrator:
         prompt: str,
         design_doc: dict[str, Any] | None = None,
         history: list[dict] | None = None,
+        realtime: Any = None,
+        project_id: str | None = None,
     ) -> OrchestratorResult:
-        system = (
-            "You are an expert HTML5 game developer. Generate a COMPLETE, SELF-CONTAINED, "
-            "PLAYABLE HTML game in a SINGLE index.html file. The game MUST:\n"
-            "1. Be a single HTML file with ALL CSS in a <style> tag and ALL JavaScript in a <script> tag.\n"
-            "2. Use HTML5 Canvas for rendering.\n"
-            "3. Have actual game logic — player movement, collision, scoring, win/lose conditions.\n"
-            "4. Have a dark background (#111 or similar) and look polished.\n"
-            "5. Be immediately playable with keyboard controls.\n"
-            "6. NOT depend on any external libraries, CDNs, or assets.\n"
-            "7. Use this exact font stack everywhere: font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', 'Inter', 'Segoe UI', Helvetica, Arial, sans-serif;\n"
-            "8. Add -webkit-font-smoothing: antialiased; and -moz-osx-font-smoothing: grayscale; to the body element.\n"
-            "9. Use font-weight: 300-600 for a clean Apple-like appearance. Use letter-spacing: -0.01em to -0.03em for headings.\n\n"
-            "Return ONLY valid strict JSON. Do not include markdown formatting like ```json.\n"
-            "The JSON must follow this exact structure:\n"
-            '{\n  "summary": "Brief description of the game",\n'
-            '  "files": {\n    "index.html": "The complete self-contained HTML game code"\n  },\n'
-            '  "entry_point": "index.html",\n  "dependencies": []\n}\n\n'
-            "CRITICAL RULES:\n"
-            "- The 'files' object MUST have exactly one key: 'index.html'\n"
-            "- The value must be the FULL HTML document string (<!DOCTYPE html> ... </html>)\n"
-            "- NO placeholders, NO external dependencies, NO CDN links\n"
-            "- The game must WORK when opened in a browser\n"
-            "- Use requestAnimationFrame for the game loop\n"
-            "- Include instructions in the game UI showing controls"
+        """Full multi-agent pipeline: Design → Assets/Scripts/Scenes → HTML5 game + Godot files.
+
+        All agents call Gemini via the shared ProviderManager. The final output
+        includes a playable index.html for browser preview AND Godot 4.x project
+        files (.gd scripts, .tscn scenes, project.godot) for engine export.
+        """
+        total_usage = ProviderUsage(provider="gemini", model="multi-agent-pipeline")
+        errors: list[str] = []
+
+        # ── Phase 1: Design Agent ── Generate game design doc via Gemini
+        if realtime and project_id:
+            await _emit(realtime, project_id, "agent_progress",
+                        {"agent": "design", "status": "running", "message": "Designing game architecture..."})
+
+        if not design_doc or not design_doc.get("entities"):
+            try:
+                design_result = await self.generate_design(prompt, history)
+                design_doc = design_result.payload
+                if design_result.usage.total_tokens:
+                    total_usage.total_tokens = (total_usage.total_tokens or 0) + design_result.usage.total_tokens
+            except Exception as e:
+                errors.append(f"Design agent error: {e}")
+                design_doc = self._fallback_design(prompt)
+
+        if realtime and project_id:
+            await _emit(realtime, project_id, "agent_progress",
+                        {"agent": "design", "status": "complete",
+                         "message": f"Game type: {design_doc.get('game_type', 'arcade')} with {len(design_doc.get('entities', []))} entities"})
+
+        # Normalize entities
+        entities_raw = design_doc.get("entities", ["Player"])
+        entities = [_normalize_entity(e) for e in entities_raw]
+        if not any(e["type"] in ("character", "player") for e in entities):
+            entities.insert(0, _normalize_entity("Player"))
+
+        # ── Phase 2: Parallel Agent Execution — Scripts, Scenes, Assets via Gemini
+        if realtime and project_id:
+            await _emit(realtime, project_id, "agent_progress",
+                        {"agent": "scripts", "status": "running",
+                         "message": f"Generating GDScript for {len(entities)} entities..."})
+            await _emit(realtime, project_id, "agent_progress",
+                        {"agent": "scenes", "status": "running",
+                         "message": f"Building Godot scenes..."})
+            await _emit(realtime, project_id, "agent_progress",
+                        {"agent": "assets", "status": "running",
+                         "message": f"Creating sprite assets..."})
+
+        script_tasks = [script_agent.run(e, design_doc) for e in entities]
+        scene_tasks = [scene_agent.run(e, design_doc) for e in entities]
+        asset_tasks = [asset_agent.run(e, design_doc) for e in entities]
+
+        all_results = await asyncio.gather(
+            *script_tasks, *scene_tasks, *asset_tasks,
+            return_exceptions=True,
         )
 
+        n = len(entities)
+        script_map: dict[str, str] = {}
+        scene_map: dict[str, str] = {}
+        asset_map: dict[str, dict] = {}
+
+        for i, entity in enumerate(entities):
+            ename = entity["name"].lower().replace(" ", "_")
+            # Scripts
+            res = all_results[i]
+            if isinstance(res, Exception):
+                errors.append(f"Script agent failed for {ename}: {res}")
+                script_map[ename] = _fallback_script(entity)
+            else:
+                script_map[ename] = res
+            # Scenes
+            res = all_results[n + i]
+            if isinstance(res, Exception):
+                errors.append(f"Scene agent failed for {ename}: {res}")
+                scene_map[ename] = f'[gd_scene format=3]\n[node name="{ename}" type="Node2D"]\n'
+            else:
+                scene_map[ename] = res
+            # Assets
+            res = all_results[2 * n + i]
+            if isinstance(res, Exception):
+                errors.append(f"Asset agent failed for {ename}: {res}")
+                asset_map[ename] = {"spec": {}, "png_b64": None, "width": 32, "height": 32}
+            else:
+                asset_map[ename] = res
+
+        if realtime and project_id:
+            await _emit(realtime, project_id, "agent_progress",
+                        {"agent": "scripts", "status": "complete", "message": f"{len(script_map)} scripts generated"})
+            await _emit(realtime, project_id, "agent_progress",
+                        {"agent": "scenes", "status": "complete", "message": f"{len(scene_map)} scenes generated"})
+            await _emit(realtime, project_id, "agent_progress",
+                        {"agent": "assets", "status": "complete", "message": f"{len(asset_map)} assets generated"})
+
+        # ── Phase 3: Generate comprehensive HTML5 game with full design context
+        if realtime and project_id:
+            await _emit(realtime, project_id, "agent_progress",
+                        {"agent": "assembler", "status": "running", "message": "Building playable HTML5 game..."})
+
+        html_game = await self._generate_rich_html_game(prompt, design_doc, entities, script_map, asset_map, history)
+
+        if realtime and project_id:
+            await _emit(realtime, project_id, "agent_progress",
+                        {"agent": "assembler", "status": "complete", "message": "Game assembled successfully"})
+
+        # ── Phase 4: Assemble ALL files — HTML5 preview + Godot project
+        game_name = design_doc.get("game_type", "game").title() + " Game"
+        files: dict[str, str] = {}
+
+        # HTML5 playable game (browser preview)
+        files["index.html"] = html_game
+
+        # Godot project files
+        files["project.godot"] = _generate_project_config(game_name)
+        files["scenes/main.tscn"] = _generate_main_scene(entities)
+        files["icon.svg"] = _generate_icon_svg()
+        files["README.md"] = _generate_readme(
+            design_doc.get("game_type", "arcade"),
+            design_doc.get("mechanics", []),
+        )
+
+        for ename, content in script_map.items():
+            if isinstance(content, str) and content.strip():
+                files[f"scripts/{ename}.gd"] = content
+        for ename, content in scene_map.items():
+            if isinstance(content, str) and content.strip():
+                files[f"scenes/{ename}.tscn"] = content
+
+        summary = (
+            f"Generated {design_doc.get('game_type', 'arcade')} game with "
+            f"{len(entities)} entities, {len(script_map)} scripts, "
+            f"{len(scene_map)} scenes. "
+            f"Preview the HTML5 version in-browser or export the Godot 4.x project files."
+        )
+        if errors:
+            summary += f" ({len(errors)} non-fatal warnings during generation)"
+
+        payload = {
+            "summary": summary,
+            "files": files,
+            "entry_point": "index.html",
+            "dependencies": [],
+            "design_doc": design_doc,
+            "godot_stats": {
+                "entities": len(entities),
+                "scripts": len(script_map),
+                "scenes": len(scene_map),
+                "assets": len(asset_map),
+            },
+            "agent_errors": errors,
+        }
+
+        return OrchestratorResult(summary=summary, payload=payload, usage=total_usage)
+
+    async def _generate_rich_html_game(
+        self,
+        prompt: str,
+        design_doc: dict[str, Any],
+        entities: list[dict[str, Any]],
+        script_map: dict[str, str],
+        asset_map: dict[str, dict],
+        history: list[dict] | None = None,
+    ) -> str:
+        """Use Gemini to create a comprehensive HTML5 game informed by all agent outputs."""
+
+        # Build entity descriptions with their behaviors from GDScript analysis
+        entity_descriptions = []
+        for entity in entities:
+            ename = entity["name"].lower().replace(" ", "_")
+            script_code = script_map.get(ename, "")
+            asset_data = asset_map.get(ename, {})
+            spec = asset_data.get("spec", {}) if isinstance(asset_data, dict) else {}
+            sprite_spec = spec.get("sprite", {}) if isinstance(spec, dict) else {}
+            colors = sprite_spec.get("color_scheme", ["#4A90E2", "#ECF0F1"])
+            shape = sprite_spec.get("shape", "rectangle")
+
+            # Extract key behaviors from GDScript
+            behaviors = []
+            if "move_and_slide" in script_code:
+                behaviors.append("physics-based movement")
+            if "JUMP_VELOCITY" in script_code or "jump" in script_code.lower():
+                behaviors.append("jumping")
+            if "patrol" in script_code.lower() or "_direction" in script_code:
+                behaviors.append("patrol AI")
+            if "queue_free" in script_code:
+                behaviors.append("collectible (disappears on contact)")
+            if "gravity" in script_code.lower():
+                behaviors.append("affected by gravity")
+
+            entity_descriptions.append(
+                f"  - {entity['name']} (type: {entity['type']}): "
+                f"shape={shape}, colors={colors}, behaviors=[{', '.join(behaviors)}]"
+            )
+
+        entity_text = "\n".join(entity_descriptions)
+        mechanics = ", ".join(design_doc.get("mechanics", ["standard"]))
+        win_conditions = ", ".join(design_doc.get("win_conditions", ["Score points"]))
+
+        system = f"""You are an expert HTML5 game developer. Generate a COMPLETE, SELF-CONTAINED,
+PLAYABLE HTML5 Canvas game in a SINGLE file.
+
+== GAME DESIGN (from Design Agent) ==
+Game type: {design_doc.get('game_type', 'arcade')}
+Mechanics: {mechanics}
+Win conditions: {win_conditions}
+Summary: {design_doc.get('summary', 'A fun game')}
+
+== ENTITIES (from Script & Asset Agents) ==
+{entity_text}
+
+== REQUIREMENTS ==
+1. Single HTML file with ALL CSS in <style> and ALL JS in <script>.
+2. Use HTML5 Canvas for rendering — no DOM-based game objects.
+3. COMPLETE game logic: player controls, enemy AI, collision detection, scoring, lives, game over, restart.
+4. Render entities matching their colors and shapes from the asset agent specs.
+5. IMPLEMENT ALL entity behaviors described above (movement, jumping, patrol AI, collectibles, gravity).
+6. Dark background (#0a0a0a or similar). Polished UI with score, lives, level indicators.
+7. Keyboard controls: Arrow keys / WASD for movement, Space/W for jump.
+8. Font: font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Inter', 'Segoe UI', Helvetica, Arial, sans-serif;
+9. Add -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; on body.
+10. NO external libraries, CDNs, images, or assets. Everything self-contained.
+11. requestAnimationFrame game loop with deltaTime for smooth animation.
+12. Multiple levels or increasing difficulty.
+13. Particle effects for collisions/collections.
+14. Start screen with game title and controls, game over screen with score and restart.
+15. Sound effects using Web Audio API (simple beeps/tones).
+16. Responsive canvas that fits the viewport.
+
+Return ONLY the complete HTML document starting with <!DOCTYPE html> and ending with </html>.
+Do NOT wrap in JSON. Do NOT add markdown fences. Return ONLY the raw HTML.
+The game MUST be immediately playable when loaded in a browser."""
+
         history_text = self._format_history(history or [])
-        design_text = f"\nDesign document:\n{json.dumps(design_doc)}\n" if design_doc else ""
-        full_prompt = f"{system}{design_text}{history_text}\nCURRENT REQUEST: {prompt}"
+        full_prompt = f"{system}{history_text}\n\nUSER REQUEST: {prompt}"
 
         try:
-            result = await provider_manager.generate(full_prompt, temperature=0.5)
-            code_doc = self._extract_json_object(result.text)
-            if not code_doc or "files" not in code_doc:
-                code_doc = self._fallback_code(prompt)
-            summary = code_doc.get("summary", "Generated HTML game.")
-            return OrchestratorResult(summary=summary, payload=code_doc, usage=result.usage)
-        except Exception:
-            code_doc = self._fallback_code(prompt)
-            return OrchestratorResult(
-                summary=code_doc["summary"],
-                payload=code_doc,
-                usage=ProviderUsage(),
-            )
+            result = await provider_manager.generate(full_prompt, temperature=0.6)
+            html = result.text.strip()
+            # Strip markdown fences if present
+            if html.startswith("```"):
+                lines = html.splitlines()
+                if lines[0].startswith("```"):
+                    lines = lines[1:]
+                if lines and lines[-1].strip() == "```":
+                    lines = lines[:-1]
+                html = "\n".join(lines).strip()
+            # Validate it looks like HTML
+            if "<!DOCTYPE" in html.upper() or "<html" in html.lower():
+                return html
+            # If Gemini returned JSON instead, try to extract
+            doc = self._extract_json_object(html)
+            if doc and "files" in doc and "index.html" in doc["files"]:
+                return doc["files"]["index.html"]
+            return self._self_contained_html_game(design_doc.get("game_type", "arcade"))
+        except Exception as e:
+            logger.warning("Rich HTML game generation failed: %s", e)
+            return self._self_contained_html_game(design_doc.get("game_type", "arcade"))
 
     async def generate_complete_game(
         self,

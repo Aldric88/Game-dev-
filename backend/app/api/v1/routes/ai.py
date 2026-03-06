@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import Response, JSONResponse
 
 from app.api.deps import get_current_user, get_storage
 from app.schemas.ai import (
@@ -17,6 +18,7 @@ from app.schemas.ai import (
 )
 from app.schemas.project import ProjectResponse
 from app.services.ai_orchestrator import ai_orchestrator
+from app.services.local_storage import save_project_files, zip_project, zip_project_from_files, open_project_folder, launch_godot
 from app.services.rate_limiter import ai_rate_limiter
 from app.services.realtime import RealtimeManager
 from app.services.s3_storage import s3_storage
@@ -118,10 +120,21 @@ async def generate_code(
         request.prompt,
         design_doc=project.get("design_doc"),
         history=project.get("ai_conversation", []),
+        realtime=realtime,
+        project_id=request.project_id,
     )
 
     files = result.payload.get("files", {})
     framework = request.framework.lower() if request.framework else "phaser"
+
+    # Save files locally to /generatedprojects
+    if files:
+        project_name = project.get("name", "untitled")
+        try:
+            saved_dir = save_project_files(project_name, request.project_id, files)
+            logger.info("Local save: %s", saved_dir)
+        except Exception as e:
+            logger.warning("Local save failed: %s", e)
 
     # Attempt S3 upload
     if files:
@@ -135,14 +148,20 @@ async def generate_code(
     versions = project.get("versions", [])
     versions.append({
         "timestamp": datetime.now(timezone.utc).isoformat(),
-        "source": "ai-code-generation",
+        "source": "ai-multi-agent-generation",
         "files": list(files.keys()),
+        "agents": ["design", "script", "scene", "asset", "assembler"],
     })
 
     history = _append_messages(project, request.prompt, result.summary)
     usage_logs = _append_usage_log(project, "generate", result.usage)
+
+    # Store design doc from pipeline if available
+    new_design = result.payload.get("design_doc") or project.get("design_doc", {})
+
     update = {
         "generated_code": result.payload,
+        "design_doc": new_design,
         "ai_conversation": history,
         "ai_usage_logs": usage_logs,
         "versions": versions,
@@ -154,7 +173,11 @@ async def generate_code(
     )
 
     if realtime:
-        await realtime.broadcast(request.project_id, "code_generated", {"files": list(files.keys())})
+        await realtime.broadcast(request.project_id, "code_generated", {
+            "files": list(files.keys()),
+            "agents_used": ["design", "script", "scene", "asset", "assembler"],
+            "godot_stats": result.payload.get("godot_stats", {}),
+        })
 
     return AICodeResponse(
         generated_code=result.payload,
@@ -226,3 +249,54 @@ async def generate_godot_game(
         stats=result.stats,
         errors=result.errors,
     )
+
+
+@router.get("/download/{project_id}")
+async def download_project_zip(
+    project_id: str,
+    storage: StorageManager = Depends(get_storage),
+    current_user: dict = Depends(get_current_user),
+) -> Response:
+    """Download all generated project files as a ZIP archive."""
+    project = await _require_project(project_id, storage)
+    generated_code = project.get("generated_code", {})
+    files = generated_code.get("files", {})
+    if not files:
+        raise HTTPException(status_code=404, detail="No generated files to download")
+
+    project_name = project.get("name", "untitled")
+    zip_bytes = zip_project_from_files(project_name, files)
+
+    safe_name = "".join(c if (c.isalnum() or c in " _-") else "_" for c in project_name).strip() or "project"
+    return Response(
+        content=zip_bytes,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{safe_name}.zip"'},
+    )
+
+@router.post("/open-folder/{project_id}")
+async def open_folder(
+    project_id: str,
+    storage: StorageManager = Depends(get_storage),
+    current_user: dict = Depends(get_current_user),
+) -> JSONResponse:
+    """Open the generated project folder in the system file explorer."""
+    project = await _require_project(project_id, storage)
+    project_name = project.get("name", "untitled")
+    result = open_project_folder(project_name, project_id)
+    status = 200 if result["success"] else 404
+    return JSONResponse(content=result, status_code=status)
+
+
+@router.post("/run-godot/{project_id}")
+async def run_godot(
+    project_id: str,
+    storage: StorageManager = Depends(get_storage),
+    current_user: dict = Depends(get_current_user),
+) -> JSONResponse:
+    """Launch Godot editor with the generated project."""
+    project = await _require_project(project_id, storage)
+    project_name = project.get("name", "untitled")
+    result = launch_godot(project_name, project_id)
+    status = 200 if result["success"] else 404
+    return JSONResponse(content=result, status_code=status)

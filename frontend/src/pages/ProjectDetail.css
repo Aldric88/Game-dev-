@@ -1,7 +1,7 @@
 /* ═══════════════════════════════════════════
    ProjectDetail — Split Layout
    Left: Chat  |  Right: Preview / Code
-   Black & White only
+   Black & White only — Godot multi-agent
    ═══════════════════════════════════════════ */
 
 /* Loading */
@@ -107,6 +107,152 @@
 }
 
 .pd-delete-btn:hover { color: #fff; background: #1a1a1a; }
+
+.pd-download-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  background: transparent;
+  color: #478cbf;
+  flex-shrink: 0;
+  transition: all 0.15s ease;
+}
+
+.pd-download-btn:hover { color: #fff; background: #1a1a1a; }
+
+.pd-folder-btn,
+.pd-godot-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  background: transparent;
+  color: #666;
+  flex-shrink: 0;
+  transition: all 0.15s ease;
+}
+
+.pd-folder-btn:hover { color: #f5f5f7; background: #1a1a1a; }
+
+.pd-godot-btn { color: #478cbf; }
+.pd-godot-btn:hover { color: #fff; background: #1f3a52; }
+
+/* ─── Right panel actions ─── */
+.pd-right-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pd-reload-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  background: transparent;
+  color: #666;
+  transition: all 0.15s ease;
+}
+
+.pd-reload-btn:hover { color: #f5f5f7; background: #1a1a1a; }
+
+/* ─── Agent Progress Panel ─── */
+.pd-agent-panel {
+  padding: 10px 16px;
+  border-bottom: 1px solid #1a1a1a;
+  background: #050505;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex-shrink: 0;
+  animation: pd-fade-in 0.2s ease;
+}
+
+@keyframes pd-fade-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.pd-agent-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  height: 22px;
+}
+
+.pd-agent-indicator {
+  width: 14px;
+  height: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.pd-agent-spinner {
+  width: 10px;
+  height: 10px;
+  border: 1.5px solid #333;
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: pd-spin 0.6s linear infinite;
+}
+
+.pd-agent-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #333;
+}
+
+.pd-agent-label {
+  font-weight: 600;
+  color: #666;
+  min-width: 90px;
+}
+
+.pd-agent-msg {
+  color: #444;
+  font-size: 11px;
+}
+
+.pd-agent-running .pd-agent-label { color: #fff; }
+.pd-agent-running .pd-agent-msg { color: #888; }
+.pd-agent-complete .pd-agent-label { color: #4ade80; }
+.pd-agent-complete .pd-agent-msg { color: #4ade80; opacity: 0.7; }
+
+/* ─── Stats Bar ─── */
+.pd-stats-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  border-bottom: 1px solid #1a1a1a;
+  background: #050505;
+  flex-shrink: 0;
+}
+
+.pd-stat {
+  font-size: 11px;
+  font-weight: 500;
+  color: #555;
+  letter-spacing: 0.02em;
+}
+
+.pd-stat-sep {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: #333;
+}
 
 /* Messages area */
 .pd-messages {
@@ -272,6 +418,15 @@
   cursor: not-allowed;
 }
 
+.pd-send-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid #555;
+  border-top-color: #000;
+  border-radius: 50%;
+  animation: pd-spin 0.6s linear infinite;
+}
+
 /* ─── Right Panel ─── */
 .pd-right {
   flex: 1;
@@ -318,25 +473,86 @@
   background: #1a1a1a;
 }
 
-/* File selector dropdown */
-.pd-file-select {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  color: #999;
-  background: #0a0a0a;
-  border: 1px solid #1a1a1a;
-  border-radius: 5px;
-  padding: 5px 10px;
-  max-width: 240px;
-  outline: none;
-  cursor: pointer;
+/* File count badge */
+.pd-file-count {
+  font-size: 11px;
+  font-weight: 500;
+  color: #555;
+  background: #111;
+  padding: 3px 8px;
+  border-radius: 10px;
 }
 
-.pd-file-select:focus { border-color: #333; }
+/* ─── Right panel body (file tree + content) ─── */
+.pd-right-body {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+}
 
-.pd-file-select option {
-  background: #0a0a0a;
+/* ─── File Tree ─── */
+.pd-file-tree {
+  width: 200px;
+  min-width: 180px;
+  border-right: 1px solid #1a1a1a;
+  background: #030303;
+  overflow-y: auto;
+  padding: 6px 0;
+  flex-shrink: 0;
+}
+
+.pd-file-group {
+  margin-bottom: 2px;
+}
+
+.pd-folder-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #555;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  user-select: none;
+}
+
+.pd-file-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 4px 8px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: #888;
+  background: transparent;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.1s ease;
+  border-left: 2px solid transparent;
+}
+
+.pd-file-item:hover {
   color: #ccc;
+  background: #0a0a0a;
+}
+
+.pd-file-item.active {
+  color: #fff;
+  background: #111;
+  border-left-color: #fff;
+}
+
+.pd-file-icon {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  width: 16px;
+  text-align: center;
+  flex-shrink: 0;
 }
 
 /* Right panel content area */
@@ -384,5 +600,10 @@
 
   .pd-right {
     height: 50vh;
+  }
+
+  .pd-file-tree {
+    width: 160px;
+    min-width: 140px;
   }
 }

@@ -66,6 +66,27 @@ export const ai = {
     request('/api/v1/ai/godot/generate', { method: 'POST', body: JSON.stringify(body) }),
 };
 
+/* ── Download ── */
+export async function downloadProjectZip(projectId) {
+  const token = localStorage.getItem('token');
+  const res = await fetch(`${BASE}/api/v1/ai/download/${projectId}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || 'Download failed');
+  }
+  return res.blob();
+}
+
+/* ── Godot Actions ── */
+export const godot = {
+  openFolder: (projectId) =>
+    request(`/api/v1/ai/open-folder/${projectId}`, { method: 'POST' }),
+  runGodot: (projectId) =>
+    request(`/api/v1/ai/run-godot/${projectId}`, { method: 'POST' }),
+};
+
 /* ── Dashboard ── */
 export const dashboard = {
   summary: () => request('/api/v1/dashboard/summary'),

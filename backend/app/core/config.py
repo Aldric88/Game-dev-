@@ -52,9 +52,9 @@ class Settings:
     ai_local_model: str = os.getenv("AI_LOCAL_MODEL", "local-model")
     ai_local_api_key: str = os.getenv("AI_LOCAL_API_KEY", "")
 
-    ai_request_timeout_seconds: int = _get_int("AI_REQUEST_TIMEOUT_SECONDS", 60)
+    ai_request_timeout_seconds: int = _get_int("AI_REQUEST_TIMEOUT_SECONDS", 120)
     ai_max_retries: int = _get_int("AI_MAX_RETRIES", 2)
-    ai_max_requests_per_minute: int = _get_int("AI_MAX_REQUESTS_PER_MINUTE", 24)
+    ai_max_requests_per_minute: int = _get_int("AI_MAX_REQUESTS_PER_MINUTE", 60)
 
     aws_access_key_id: str = os.getenv("AWS_ACCESS_KEY_ID", "")
     aws_secret_access_key: str = os.getenv("AWS_SECRET_ACCESS_KEY", "")

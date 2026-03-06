@@ -91,7 +91,7 @@ export default function Projects() {
 
     setSending(true);
     setError('');
-    setStatus('Creating project...');
+    setStatus('Initializing multi-agent pipeline...');
 
     // Build full prompt with attachment context
     let fullPrompt = text;
@@ -109,7 +109,7 @@ export default function Projects() {
         framework: 'phaser',
       });
 
-      setStatus('Generating game code with AI...');
+      setStatus('Running Design, Script, Scene, and Asset agents via Gemini...');
       await aiApi.generate({
         project_id: proj.project_id,
         prompt: fullPrompt,

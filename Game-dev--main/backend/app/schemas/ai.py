@@ -1,0 +1,50 @@
+from typing import Any, Optional
+
+from pydantic import BaseModel, Field
+
+from app.schemas.project import ProjectResponse
+
+
+class AIDesignRequest(BaseModel):
+    project_id: str
+    prompt: str
+
+
+class AIDesignResponse(BaseModel):
+    summary: str = ""
+    design_doc: dict = Field(default_factory=dict)
+    project: Optional[ProjectResponse] = None
+
+
+class AICodeRequest(BaseModel):
+    project_id: str
+    prompt: str
+    framework: str = "phaser"
+
+
+class AICodeResponse(BaseModel):
+    generated_code: dict = Field(default_factory=dict)
+    project: Optional[ProjectResponse] = None
+
+
+class AIChatRequest(BaseModel):
+    project_id: str
+    message: str
+
+
+class AIChatResponse(BaseModel):
+    reply: str = ""
+    project: Optional[ProjectResponse] = None
+
+
+class GodotGenerateRequest(BaseModel):
+    project_id: str
+    prompt: str
+
+
+class GodotGenerateResponse(BaseModel):
+    status: str = ""
+    design_doc: dict = Field(default_factory=dict)
+    file_urls: list = Field(default_factory=list)
+    stats: dict = Field(default_factory=dict)
+    errors: list = Field(default_factory=list)

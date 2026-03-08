@@ -1,0 +1,65 @@
+[gd_scene load_steps=14 format=3 uid="uid://21e1a5bf"]
+
+[ext_resource type="PackedScene" path="res://scenes/player_spaceship.tscn" id="1"]
+[ext_resource type="PackedScene" path="res://scenes/alien_fighter.tscn" id="2"]
+[ext_resource type="PackedScene" path="res://scenes/alien_cruiser.tscn" id="3"]
+[ext_resource type="PackedScene" path="res://scenes/asteroid_field.tscn" id="4"]
+[ext_resource type="PackedScene" path="res://scenes/health_power-up.tscn" id="5"]
+[ext_resource type="PackedScene" path="res://scenes/damage_power-up.tscn" id="6"]
+[ext_resource type="PackedScene" path="res://scenes/score_multiplier_power-up.tscn" id="7"]
+[ext_resource type="PackedScene" path="res://scenes/score_display.tscn" id="8"]
+[ext_resource type="PackedScene" path="res://scenes/health_bar.tscn" id="9"]
+[ext_resource type="PackedScene" path="res://scenes/weapon_icons.tscn" id="10"]
+[ext_resource type="PackedScene" path="res://scenes/space_dust.tscn" id="11"]
+[ext_resource type="PackedScene" path="res://scenes/nebula.tscn" id="12"]
+[ext_resource type="PackedScene" path="res://scenes/boss_ship.tscn" id="13"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_21e1a5bf"]
+size = Vector2(1280, 32)
+
+[node name="Main" type="Node2D"]
+
+[node name="Ground" type="StaticBody2D" parent="."]
+position = Vector2(640, 700)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Ground"]
+shape = SubResource("RectangleShape2D_21e1a5bf")
+
+[node name="Player Spaceship" parent="." instance=ExtResource("1")]
+position = Vector2(100, 600)
+
+[node name="Alien Fighter" parent="." instance=ExtResource("2")]
+position = Vector2(300, 600)
+
+[node name="Alien Cruiser" parent="." instance=ExtResource("3")]
+position = Vector2(500, 600)
+
+[node name="Asteroid Field" parent="." instance=ExtResource("4")]
+position = Vector2(700, 600)
+
+[node name="Health Power-Up" parent="." instance=ExtResource("5")]
+position = Vector2(900, 600)
+
+[node name="Damage Power-Up" parent="." instance=ExtResource("6")]
+position = Vector2(1100, 600)
+
+[node name="Score Multiplier Power-Up" parent="." instance=ExtResource("7")]
+position = Vector2(1300, 600)
+
+[node name="Score Display" parent="." instance=ExtResource("8")]
+position = Vector2(1500, 600)
+
+[node name="Health Bar" parent="." instance=ExtResource("9")]
+position = Vector2(1700, 600)
+
+[node name="Weapon Icons" parent="." instance=ExtResource("10")]
+position = Vector2(1900, 600)
+
+[node name="Space Dust" parent="." instance=ExtResource("11")]
+position = Vector2(2100, 600)
+
+[node name="Nebula" parent="." instance=ExtResource("12")]
+position = Vector2(2300, 600)
+
+[node name="Boss Ship" parent="." instance=ExtResource("13")]
+position = Vector2(2500, 600)

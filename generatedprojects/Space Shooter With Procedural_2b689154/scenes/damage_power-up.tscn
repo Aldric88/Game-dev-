@@ -1,0 +1,51 @@
+[gd_scene load_steps=4 format=3]
+
+
+[ext_resource type="Script" path="res://scripts/damage_power_up.gd" id="Script_a782e790abb9_1"]
+
+[ext_resource type="Texture2D" path="res://assets/powerup_damage.png" id="Texture_a782e790abb9_0"]
+
+
+
+[sub_resource type="CircleShape2D" id="RectangleShape2D_a782e790abb9_0"]
+
+
+radius = 16
+
+
+
+
+[node name="DamagePowerUp" type="Area2D"]
+
+script = ExtResource("Script_a782e790abb9_1")
+
+
+gravity_point_unit = false
+
+gravity_point_distance_scale = 1.0
+
+gravity_vec_length = 0.0
+
+linear_damp_override = false
+
+angular_damp_override = false
+
+linear_damp = 0.0
+
+angular_damp = 0.0
+
+
+
+[node name="Sprite2D" type="Sprite2D" parent="."]
+
+texture = ExtResource("Texture_a782e790abb9_0")
+
+
+
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+
+
+shape = SubResource("RectangleShape2D_a782e790abb9_0")
+
+

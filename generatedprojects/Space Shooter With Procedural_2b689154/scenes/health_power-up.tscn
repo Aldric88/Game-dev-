@@ -1,0 +1,47 @@
+[gd_scene load_steps=4 format=3]
+
+
+[ext_resource type="Script" path="res://scripts/health_power_up.gd" id="Script_e882fa6040ce_1"]
+
+[ext_resource type="Texture2D" path="res://assets/health_powerup.png" id="Texture_e882fa6040ce_0"]
+
+
+
+[sub_resource type="CircleShape2D" id="RectangleShape2D_e882fa6040ce_0"]
+
+
+radius = 16
+
+
+
+
+[node name="HealthPowerUp" type="Area2D"]
+
+script = ExtResource("Script_e882fa6040ce_1")
+
+
+gravity_point_unit_distance = false
+
+gravity_point_unit_acceleration = false
+
+gravity_is_point = false
+
+monitoring = true
+
+monitorable = true
+
+
+
+[node name="Sprite2D" type="Sprite2D" parent="."]
+
+texture = ExtResource("Texture_e882fa6040ce_0")
+
+
+
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+
+
+shape = SubResource("RectangleShape2D_e882fa6040ce_0")
+
+

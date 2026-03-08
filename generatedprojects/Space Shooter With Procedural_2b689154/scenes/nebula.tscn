@@ -1,0 +1,71 @@
+[gd_scene load_steps=3 format=3]
+
+
+[ext_resource type="Texture2D" path="res://assets/star1.png" id="Texture_2878ac7dc78e_2"]
+
+[ext_resource type="Texture2D" path="res://assets/star2.png" id="Texture_2878ac7dc78e_4"]
+
+
+
+
+[node name="Nebula" type="Node2D"]
+
+
+
+
+[node name="Starfield" type="ParallaxBackground" parent="."]
+
+
+
+
+[node name="ParallaxLayer1" type="ParallaxLayer" parent="Starfield"]
+
+
+
+motion_scale = Vector2(0.1, 0.1)
+
+
+[node name="Sprite1" type="Sprite2D" parent="ParallaxLayer1"]
+
+texture = ExtResource("Texture_2878ac7dc78e_2")
+
+
+
+
+[node name="ParallaxLayer2" type="ParallaxLayer" parent="Starfield"]
+
+
+
+motion_scale = Vector2(0.3, 0.3)
+
+
+[node name="Sprite2" type="Sprite2D" parent="ParallaxLayer2"]
+
+texture = ExtResource("Texture_2878ac7dc78e_4")
+
+
+
+
+[node name="EnemySpawner" type="Node" parent="."]
+
+
+
+
+[node name="PowerUpSpawner" type="Node" parent="."]
+
+
+
+
+[node name="HUD" type="CanvasLayer" parent="."]
+
+
+
+
+[node name="ScoreLabel" type="Label" parent="HUD"]
+
+
+
+text = "Score: 0"
+
+horizontal_alignment = 1
+

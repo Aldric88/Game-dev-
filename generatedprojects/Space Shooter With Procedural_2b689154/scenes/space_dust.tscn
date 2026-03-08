@@ -1,0 +1,90 @@
+[gd_scene load_steps=4 format=3]
+
+
+[ext_resource type="Texture2D" path="res://assets/player.png" id="Texture_62fa8dfabcc4_1"]
+
+[ext_resource type="Texture2D" path="res://assets/background.png" id="Texture_62fa8dfabcc4_8"]
+
+
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_62fa8dfabcc4_0"]
+
+size = Vector2(32, 32)
+
+
+
+
+
+[node name="SpaceDust" type="Node2D"]
+
+
+
+
+[node name="Player" type="CharacterBody2D" parent="."]
+
+
+
+motion_mode = 1
+
+gravity_scale = 0
+
+
+[node name="PlayerSprite" type="Sprite2D" parent="Player"]
+
+texture = ExtResource("Texture_62fa8dfabcc4_1")
+
+
+
+
+[node name="PlayerCollisionShape" type="CollisionShape2D" parent="Player"]
+
+
+shape = SubResource("RectangleShape2D_62fa8dfabcc4_0")
+
+
+
+[node name="WeaponMount" type="Node2D" parent="Player"]
+
+
+
+
+[node name="AnimationPlayer" type="AnimationPlayer" parent="Player"]
+
+
+
+
+[node name="EnemySpawner" type="Node2D" parent="."]
+
+
+
+
+[node name="Background" type="ParallaxBackground" parent="."]
+
+
+
+
+[node name="ParallaxLayer" type="ParallaxLayer" parent="Background"]
+
+
+
+motion_mirroring = Vector2(1280, 720)
+
+
+[node name="BackgroundSprite" type="Sprite2D" parent="ParallaxLayer"]
+
+texture = ExtResource("Texture_62fa8dfabcc4_8")
+
+
+
+
+[node name="UI" type="CanvasLayer" parent="."]
+
+
+
+
+[node name="ScoreLabel" type="Label" parent="UI"]
+
+
+
+text = "Score: 0"
+

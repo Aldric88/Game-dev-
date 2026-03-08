@@ -1,0 +1,62 @@
+[gd_scene load_steps=4 format=3]
+
+
+[ext_resource type="Script" path="res://scripts/player_spaceship.gd" id="Script_b70267e62876_1"]
+
+[ext_resource type="Texture2D" path="res://assets/player_spaceship.png" id="Texture_b70267e62876_0"]
+
+
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_b70267e62876_0"]
+
+size = Vector2(64, 32)
+
+
+
+
+
+[node name="PlayerSpaceship" type="CharacterBody2D"]
+
+script = ExtResource("Script_b70267e62876_1")
+
+
+motion_mode = 0
+
+position = Vector2(576, 640)
+
+
+
+[node name="Sprite2D" type="Sprite2D" parent="."]
+
+texture = ExtResource("Texture_b70267e62876_0")
+
+
+
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+
+
+shape = SubResource("RectangleShape2D_b70267e62876_0")
+
+
+
+[node name="WeaponMount" type="Node2D" parent="."]
+
+
+
+position = Vector2(20, 0)
+
+
+[node name="AnimationPlayer" type="AnimationPlayer" parent="."]
+
+
+
+
+[node name="Camera2D" type="Camera2D" parent="."]
+
+
+
+zoom = Vector2(0.5, 0.5)
+
+enabled = true
+

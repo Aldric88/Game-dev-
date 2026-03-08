@@ -1,0 +1,60 @@
+[gd_scene load_steps=4 format=3]
+
+
+[ext_resource type="Script" path="res://scripts/alien_fighter.gd" id="Script_9f283ff62415_1"]
+
+[ext_resource type="Texture2D" path="res://assets/alien_fighter.png" id="Texture_9f283ff62415_0"]
+
+
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_9f283ff62415_0"]
+
+size = Vector2(20, 10)
+
+
+
+
+
+[node name="AlienFighter" type="CharacterBody2D"]
+
+script = ExtResource("Script_9f283ff62415_1")
+
+
+motion_mode = 1
+
+gravity_scale = 0.0
+
+
+
+[node name="Sprite2D" type="Sprite2D" parent="."]
+
+texture = ExtResource("Texture_9f283ff62415_0")
+
+
+
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+
+
+shape = SubResource("RectangleShape2D_9f283ff62415_0")
+
+
+
+[node name="LeftGun" type="Marker2D" parent="."]
+
+
+
+position = Vector2(-10, 0)
+
+
+[node name="RightGun" type="Marker2D" parent="."]
+
+
+
+position = Vector2(10, 0)
+
+
+[node name="AnimationPlayer" type="AnimationPlayer" parent="."]
+
+
+

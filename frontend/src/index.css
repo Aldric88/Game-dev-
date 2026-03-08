@@ -68,6 +68,28 @@ body {
   min-height: 100vh;
 }
 
+/* ── App background gradient layer ── */
+.app-bg-gradient {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  background: #000000;
+  pointer-events: none;
+}
+
+/* Utility container for project grid */
+.container-wide {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 0 24px;
+}
+
+.container {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 0 24px;
+}
+
 a {
   color: var(--text-link);
   text-decoration: none;

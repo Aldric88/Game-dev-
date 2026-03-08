@@ -1,0 +1,61 @@
+[gd_scene load_steps=4 format=3]
+
+
+[ext_resource type="Script" path="res://scripts/ai_opponent_car.gd" id="Script_386a9fead7ae_1"]
+
+[ext_resource type="Texture2D" path="res://assets/car.png" id="Texture_386a9fead7ae_0"]
+
+
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_386a9fead7ae_0"]
+
+size = Vector2(24, 48)
+
+
+
+
+
+[node name="AiOpponentCar" type="CharacterBody2D"]
+
+script = ExtResource("Script_386a9fead7ae_1")
+
+
+speed = 200.0
+
+rotation_speed = 2.0
+
+drift_factor = 0.5
+
+acceleration = 100.0
+
+braking = 200.0
+
+
+
+[node name="Sprite2D" type="Sprite2D" parent="."]
+
+texture = ExtResource("Texture_386a9fead7ae_0")
+
+
+
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+
+
+shape = SubResource("RectangleShape2D_386a9fead7ae_0")
+
+
+
+[node name="AnimationPlayer" type="AnimationPlayer" parent="."]
+
+
+
+
+[node name="NavigationAgent2D" type="NavigationAgent2D" parent="."]
+
+
+
+path_desired_distance = 16.0
+
+target_desired_distance = 16.0
+

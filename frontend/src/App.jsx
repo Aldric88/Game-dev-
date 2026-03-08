@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './AuthContext';
 import Navbar from './components/Navbar';
+import PixelBlast from './components/PixelBlast';
 import Landing from './pages/Landing';
 import Login from './pages/Login';
 import Register from './pages/Register';
@@ -39,15 +40,37 @@ export default function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
-        <Navbar />
-        <Routes>
-          <Route path="/" element={<Landing />} />
-          <Route path="/login" element={<GuestRoute><Login /></GuestRoute>} />
-          <Route path="/register" element={<GuestRoute><Register /></GuestRoute>} />
-          <Route path="/projects" element={<PrivateRoute><Projects /></PrivateRoute>} />
-          <Route path="/projects/:id" element={<PrivateRoute><ProjectDetail /></PrivateRoute>} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+        {/* Layered background: gradient base + PixelBlast overlay */}
+        <div className="app-bg-gradient" />
+        <PixelBlast
+          variant="circle"
+          color="#ffffff"
+          pixelSize={2}
+          patternScale={3}
+          patternDensity={0.5}
+          speed={0.2}
+          edgeFade={0.4}
+          enableRipples
+          transparent
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 1,
+            pointerEvents: 'auto',
+            opacity: 0.08,
+          }}
+        />
+        <div style={{ position: 'relative', zIndex: 2 }}>
+          <Navbar />
+          <Routes>
+            <Route path="/" element={<Landing />} />
+            <Route path="/login" element={<GuestRoute><Login /></GuestRoute>} />
+            <Route path="/register" element={<GuestRoute><Register /></GuestRoute>} />
+            <Route path="/projects" element={<PrivateRoute><Projects /></PrivateRoute>} />
+            <Route path="/projects/:id" element={<PrivateRoute><ProjectDetail /></PrivateRoute>} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </div>
       </AuthProvider>
     </BrowserRouter>
   );

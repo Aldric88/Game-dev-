@@ -39,6 +39,13 @@ export default function Projects() {
   const inputRef = useRef(null);
   const fileRef = useRef(null);
 
+  const SUGGESTIONS = [
+    'Retro platformer with pixel art and power-ups',
+    'Top-down racing game with drifting mechanics',
+    'Physics-based puzzle game with gravity switching',
+    'Space shooter with procedural enemy waves',
+  ];
+
   const load = useCallback(() => {
     setLoading(true);
     api.list()
@@ -151,6 +158,7 @@ export default function Projects() {
       <div className="prompt-hero">
         <div className="prompt-container">
           <h1 className="prompt-heading">What do you want to build?</h1>
+          <p className="prompt-subheading">Describe your game idea and our AI agents will generate it for you</p>
 
           {error && <div className="prompt-error">{error}</div>}
 
@@ -227,44 +235,145 @@ export default function Projects() {
               </div>
             </div>
           </form>
+
+          {/* ── Suggestion chips ── */}
+          <div className="prompt-suggestions">
+            <span className="prompt-suggestions-label">Try these</span>
+            <div className="prompt-suggestions-list">
+              {SUGGESTIONS.map((s, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  className="prompt-suggestion"
+                  onClick={() => { setPrompt(s); inputRef.current?.focus(); }}
+                  disabled={sending}
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
       </div>
 
-      {/* ── Project Grid ── */}
-      {list.length > 0 && (
-        <div className="container-wide">
-          <div className="projects-section-header">
-            <h2 className="projects-section-title">Your Projects</h2>
-            <span className="projects-count">{list.length}</span>
+      {/* ── Main content: projects + sidebar ── */}
+      <div className="container-wide">
+        <div className="projects-layout">
+          {/* Left: project grid */}
+          <div className="projects-main">
+            <div className="projects-section-header">
+              <h2 className="projects-section-title">Your Projects</h2>
+              <span className="projects-count">{list.length}</span>
+            </div>
+            <div className="projects-grid">
+              {list.map((p) => (
+                <Link key={p.project_id} to={`/projects/${p.project_id}`} className="project-link">
+                  <Card hover className="project-card">
+                    <div className="project-card-top">
+                      <h3 className="project-name">{p.name}</h3>
+                      <Badge variant={STATUS_BADGE[p.status] || 'default'}>{p.status}</Badge>
+                    </div>
+                    {p.description && <p className="project-desc">{p.description}</p>}
+                    <div className="project-card-meta">
+                      <span className="project-framework">{p.framework}</span>
+                      <span className="project-date">{formatDate(p.updated_at)}</span>
+                    </div>
+                    <button
+                      className="project-delete"
+                      onClick={(e) => handleDelete(p.project_id, e)}
+                      title="Delete"
+                    >
+                      <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                        <path d="M1 1l12 12M13 1L1 13" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                      </svg>
+                    </button>
+                  </Card>
+                </Link>
+              ))}
+
+              {/* Ghost "New Project" card */}
+              <button
+                className="project-ghost"
+                onClick={() => { inputRef.current?.focus(); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+              >
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                  <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                </svg>
+                <span>New Project</span>
+              </button>
+            </div>
           </div>
-          <div className="projects-grid">
-            {list.map((p) => (
-              <Link key={p.project_id} to={`/projects/${p.project_id}`} className="project-link">
-                <Card hover className="project-card">
-                  <div className="project-card-top">
-                    <h3 className="project-name">{p.name}</h3>
-                    <Badge variant={STATUS_BADGE[p.status] || 'default'}>{p.status}</Badge>
+
+          {/* Right: sidebar */}
+          <aside className="projects-sidebar">
+            <div className="sidebar-section">
+              <h3 className="sidebar-title">Recent Updates</h3>
+              <div className="sidebar-list">
+                <div className="sidebar-item">
+                  <span className="sidebar-item-dot" />
+                  <div>
+                    <p className="sidebar-item-text">Multi-agent pipeline with Gemini</p>
+                    <span className="sidebar-item-meta">v2.0</span>
                   </div>
-                  {p.description && <p className="project-desc">{p.description}</p>}
-                  <div className="project-card-meta">
-                    <span className="project-framework">{p.framework}</span>
-                    <span className="project-date">{formatDate(p.updated_at)}</span>
+                </div>
+                <div className="sidebar-item">
+                  <span className="sidebar-item-dot" />
+                  <div>
+                    <p className="sidebar-item-text">Phaser 3 framework support</p>
+                    <span className="sidebar-item-meta">v1.8</span>
                   </div>
-                  <button
-                    className="project-delete"
-                    onClick={(e) => handleDelete(p.project_id, e)}
-                    title="Delete"
-                  >
-                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                      <path d="M1 1l12 12M13 1L1 13" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-                    </svg>
-                  </button>
-                </Card>
-              </Link>
-            ))}
-          </div>
+                </div>
+                <div className="sidebar-item">
+                  <span className="sidebar-item-dot" />
+                  <div>
+                    <p className="sidebar-item-text">Real-time preview in browser</p>
+                    <span className="sidebar-item-meta">v1.5</span>
+                  </div>
+                </div>
+                <div className="sidebar-item">
+                  <span className="sidebar-item-dot" />
+                  <div>
+                    <p className="sidebar-item-text">File attachment support</p>
+                    <span className="sidebar-item-meta">v1.3</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="sidebar-section">
+              <h3 className="sidebar-title">Quick Stats</h3>
+              <div className="sidebar-stats">
+                <div className="sidebar-stat">
+                  <span className="sidebar-stat-value">{list.length}</span>
+                  <span className="sidebar-stat-label">Projects</span>
+                </div>
+                <div className="sidebar-stat">
+                  <span className="sidebar-stat-value">{list.filter(p => p.status === 'ready').length}</span>
+                  <span className="sidebar-stat-label">Ready</span>
+                </div>
+                <div className="sidebar-stat">
+                  <span className="sidebar-stat-value">{list.filter(p => p.status === 'building').length}</span>
+                  <span className="sidebar-stat-label">Building</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="sidebar-section">
+              <h3 className="sidebar-title">Keyboard Shortcuts</h3>
+              <div className="sidebar-shortcuts">
+                <div className="sidebar-shortcut">
+                  <kbd>Enter</kbd>
+                  <span>Send prompt</span>
+                </div>
+                <div className="sidebar-shortcut">
+                  <kbd>Shift + Enter</kbd>
+                  <span>New line</span>
+                </div>
+              </div>
+            </div>
+          </aside>
         </div>
-      )}
+      </div>
     </div>
   );
 }

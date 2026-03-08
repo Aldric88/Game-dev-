@@ -1,0 +1,45 @@
+[gd_scene load_steps=9 format=3 uid="uid://372602fd"]
+
+[ext_resource type="PackedScene" path="res://scenes/player_car.tscn" id="1"]
+[ext_resource type="PackedScene" path="res://scenes/ai_opponent.tscn" id="2"]
+[ext_resource type="PackedScene" path="res://scenes/neon_barrier.tscn" id="3"]
+[ext_resource type="PackedScene" path="res://scenes/speed_boost.tscn" id="4"]
+[ext_resource type="PackedScene" path="res://scenes/finish_line.tscn" id="5"]
+[ext_resource type="PackedScene" path="res://scenes/lap_counter.tscn" id="6"]
+[ext_resource type="PackedScene" path="res://scenes/speedometer.tscn" id="7"]
+[ext_resource type="PackedScene" path="res://scenes/neon_sign.tscn" id="8"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_372602fd"]
+size = Vector2(1280, 32)
+
+[node name="Main" type="Node2D"]
+
+[node name="Ground" type="StaticBody2D" parent="."]
+position = Vector2(640, 700)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Ground"]
+shape = SubResource("RectangleShape2D_372602fd")
+
+[node name="Player Car" parent="." instance=ExtResource("1")]
+position = Vector2(100, 600)
+
+[node name="Ai Opponent" parent="." instance=ExtResource("2")]
+position = Vector2(300, 600)
+
+[node name="Neon Barrier" parent="." instance=ExtResource("3")]
+position = Vector2(500, 600)
+
+[node name="Speed Boost" parent="." instance=ExtResource("4")]
+position = Vector2(700, 600)
+
+[node name="Finish Line" parent="." instance=ExtResource("5")]
+position = Vector2(900, 600)
+
+[node name="Lap Counter" parent="." instance=ExtResource("6")]
+position = Vector2(1100, 600)
+
+[node name="Speedometer" parent="." instance=ExtResource("7")]
+position = Vector2(1300, 600)
+
+[node name="Neon Sign" parent="." instance=ExtResource("8")]
+position = Vector2(1500, 600)

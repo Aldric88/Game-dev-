@@ -1,0 +1,686 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Neon Drift</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #000000;
+            font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Inter', 'Segoe UI', sans-serif;
+            -webkit-font-smoothing: antialiased;
+            color: #FFFFFF;
+        }
+
+        canvas {
+            display: block;
+        }
+
+        #startScreen, #gameOverScreen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.8);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+            font-size: 2em;
+        }
+
+        #gameOverScreen {
+            display: none;
+        }
+
+        #scoreDisplay {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            font-size: 1.5em;
+        }
+
+        #lapCounter {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            font-size: 1.5em;
+        }
+
+        #speedometer {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            width: 100px;
+            height: 50px; /* Adjust height as needed */
+        }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas"></canvas>
+    <div id="startScreen">
+        <h1>Neon Drift</h1>
+        <p>Use Arrow Keys to Steer</p>
+        <p>Hold SPACE to Drift</p>
+        <p>Collect Boosts!</p>
+        <p>Press SPACE to Start</p>
+    </div>
+    <div id="gameOverScreen">
+        <h1>Game Over</h1>
+        <p>Final Score: <span id="finalScore">0</span></p>
+        <p>Press SPACE to Restart</p>
+    </div>
+    <div id="scoreDisplay">Score: <span id="score">0</span></div>
+    <div id="lapCounter">Lap: <span id="lap">1</span> / <span id="totalLaps">3</span></div>
+    <canvas id="speedometer"></canvas>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const startScreen = document.getElementById('startScreen');
+        const gameOverScreen = document.getElementById('gameOverScreen');
+        const scoreDisplay = document.getElementById('scoreDisplay');
+        const finalScoreDisplay = document.getElementById('finalScore');
+        const lapCounterDisplay = document.getElementById('lapCounter');
+        const lapDisplay = document.getElementById('lap');
+        const totalLapsDisplay = document.getElementById('totalLaps');
+        const speedometerCanvas = document.getElementById('speedometer');
+        const speedometerCtx = speedometerCanvas.getContext('2d');
+
+        let gameRunning = false;
+        let score = 0;
+        let lap = 1;
+        const totalLaps = 3;
+        let player;
+        let opponents = [];
+        let boostPads = [];
+        let particles = [];
+        let lastTime = 0;
+        let keys = {};
+        let track;
+        let camera = { x: 0, y: 0 };
+        let boostSound, driftSound, engineSound;
+
+        const carWidth = 30;
+        const carHeight = 60;
+        const opponentWidth = 25;
+        const opponentHeight = 50;
+        const boostRadius = 15;
+        const neonPink = '#FF00FF';
+        const neonCyan = '#00FFFF';
+        const neonYellow = '#FFFF00';
+        const neonRed = '#FF0000';
+        const neonWhite = '#FFFFFF';
+        const trackColor = '#333333';
+        const grassColor = '#006400';
+        const sandColor = '#D2B48C';
+
+        // Audio setup
+        function initAudio() {
+            const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+            boostSound = createOscillator(audioCtx, 440, 0.1); // A simple beep
+            driftSound = createNoise(audioCtx, 0.2); // White noise for drift
+            engineSound = createEngineSound(audioCtx); // Engine hum
+        }
+
+        function createOscillator(audioCtx, frequency, duration) {
+            return {
+                play: () => {
+                    const oscillator = audioCtx.createOscillator();
+                    oscillator.type = 'sine';
+                    oscillator.frequency.setValueAtTime(frequency, audioCtx.currentTime);
+                    oscillator.connect(audioCtx.destination);
+                    oscillator.start();
+                    oscillator.stop(audioCtx.currentTime + duration);
+                }
+            };
+        }
+
+        function createNoise(audioCtx, duration) {
+            return {
+                play: () => {
+                    const bufferSize = audioCtx.sampleRate * duration;
+                    const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+                    const data = buffer.getChannelData(0);
+                    for (let i = 0; i < bufferSize; i++) {
+                        data[i] = Math.random() * 2 - 1;
+                    }
+
+                    const noise = audioCtx.createBufferSource();
+                    noise.buffer = buffer;
+                    noise.connect(audioCtx.destination);
+                    noise.start();
+                }
+            };
+        }
+
+        function createEngineSound(audioCtx) {
+            const oscillator = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+
+            oscillator.type = 'sine';
+            oscillator.frequency.setValueAtTime(220, audioCtx.currentTime); // Base engine frequency
+            oscillator.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+
+            oscillator.start();
+
+            return {
+                setFrequency: (frequency) => {
+                    oscillator.frequency.setValueAtTime(frequency, audioCtx.currentTime);
+                },
+                setVolume: (volume) => {
+                    gainNode.gain.setValueAtTime(volume, audioCtx.currentTime);
+                },
+                stop: () => {
+                    oscillator.stop();
+                }
+            };
+        }
+
+        // Particle Effects
+        function createExplosion(x, y, color) {
+            for (let i = 0; i < 30; i++) {
+                particles.push(new Particle(x, y, color));
+            }
+        }
+
+        function createTrail(x, y, angle, speed, color) {
+            particles.push(new TrailParticle(x, y, angle, speed, color));
+        }
+
+        function createSparkle(x, y, color) {
+            particles.push(new SparkleParticle(x, y, color));
+        }
+
+        class Particle {
+            constructor(x, y, color) {
+                this.x = x;
+                this.y = y;
+                this.color = color;
+                this.size = Math.random() * 5 + 2;
+                this.speedX = (Math.random() - 0.5) * 5;
+                this.speedY = (Math.random() - 0.5) * 5;
+                this.alpha = 1;
+            }
+
+            update(deltaTime) {
+                this.x += this.speedX * deltaTime;
+                this.y += this.speedY * deltaTime;
+                this.alpha -= 0.01 * deltaTime;
+            }
+
+            draw(ctx, cameraX, cameraY) {
+                ctx.globalAlpha = Math.max(this.alpha, 0); // Ensure alpha doesn't go below 0
+                ctx.fillStyle = this.color;
+                ctx.fillRect(this.x - this.size / 2 - cameraX, this.y - this.size / 2 - cameraY, this.size, this.size);
+                ctx.globalAlpha = 1;
+            }
+        }
+
+        class TrailParticle {
+            constructor(x, y, angle, speed, color) {
+                this.x = x;
+                this.y = y;
+                this.color = color;
+                this.size = 3;
+                this.angle = angle;
+                this.speed = speed;
+                this.alpha = 1;
+            }
+
+            update(deltaTime) {
+                this.x += Math.cos(this.angle) * this.speed * deltaTime;
+                this.y += Math.sin(this.angle) * this.speed * deltaTime;
+                this.alpha -= 0.02 * deltaTime;
+            }
+
+            draw(ctx, cameraX, cameraY) {
+                ctx.globalAlpha = Math.max(this.alpha, 0);
+                ctx.fillStyle = this.color;
+                ctx.fillRect(this.x - this.size / 2 - cameraX, this.y - this.size / 2 - cameraY, this.size, this.size);
+                ctx.globalAlpha = 1;
+            }
+        }
+
+        class SparkleParticle {
+            constructor(x, y, color) {
+                this.x = x;
+                this.y = y;
+                this.color = color;
+                this.size = Math.random() * 3 + 1;
+                this.speedX = (Math.random() - 0.5) * 3;
+                this.speedY = (Math.random() - 0.5) * 3;
+                this.alpha = 1;
+            }
+
+            update(deltaTime) {
+                this.x += this.speedX * deltaTime;
+                this.y += this.speedY * deltaTime;
+                this.alpha -= 0.05 * deltaTime;
+            }
+
+            draw(ctx, cameraX, cameraY) {
+                ctx.globalAlpha = Math.max(this.alpha, 0);
+                ctx.fillStyle = this.color;
+                ctx.fillRect(this.x - this.size / 2 - cameraX, this.y - this.size / 2 - cameraY, this.size, this.size);
+                ctx.globalAlpha = 1;
+            }
+        }
+
+        // Game Objects
+        class Car {
+            constructor(x, y, color1, color2) {
+                this.x = x;
+                this.y = y;
+                this.width = carWidth;
+                this.height = carHeight;
+                this.angle = 0;
+                this.speed = 0;
+                this.maxSpeed = 200;
+                this.acceleration = 100;
+                this.deceleration = 50;
+                this.turnSpeed = 150;
+                this.driftAngle = 0;
+                this.driftSpeed = 0;
+                this.isDrifting = false;
+                this.driftFactor = 0.95;
+                this.color1 = color1;
+                this.color2 = color2;
+                this.driftParticles = [];
+            }
+
+            update(deltaTime) {
+                // Drifting
+                if (keys['Space'] && this.speed > 50) {
+                    if (!this.isDrifting) {
+                        driftSound.play();
+                        this.driftAngle = this.angle;
+                    }
+                    this.isDrifting = true;
+                    this.driftSpeed = this.speed;
+                    this.speed *= this.driftFactor;
+                } else {
+                    this.isDrifting = false;
+                }
+
+                // Movement
+                if (keys['ArrowUp'] || keys['w']) {
+                    this.speed = Math.min(this.speed + this.acceleration * deltaTime, this.maxSpeed);
+                } else if (keys['ArrowDown'] || keys['s']) {
+                    this.speed = Math.max(this.speed - this.deceleration * deltaTime, -this.maxSpeed / 2);
+                } else {
+                    this.speed = this.speed > 0 ? Math.max(this.speed - this.deceleration * deltaTime, 0) : Math.min(this.speed + this.deceleration * deltaTime, 0);
+                }
+
+                // Turning
+                if (keys['ArrowLeft'] || keys['a']) {
+                    this.angle -= this.turnSpeed * deltaTime * (this.speed / this.maxSpeed);
+                }
+                if (keys['ArrowRight'] || keys['d']) {
+                    this.angle += this.turnSpeed * deltaTime * (this.speed / this.maxSpeed);
+                }
+
+                // Update position
+                if (this.isDrifting) {
+                    this.x += Math.cos(this.driftAngle) * this.driftSpeed * deltaTime;
+                    this.y += Math.sin(this.driftAngle) * this.driftSpeed * deltaTime;
+                    // Drift particles
+                    const driftX = this.x - Math.cos(this.driftAngle) * this.width / 2;
+                    const driftY = this.y - Math.sin(this.driftAngle) * this.height / 2;
+                    createTrail(driftX, driftY, this.driftAngle + Math.PI + (Math.random() - 0.5) * 0.2, this.speed / 10, neonWhite);
+                } else {
+                    this.x += Math.cos(this.angle) * this.speed * deltaTime;
+                    this.y += Math.sin(this.angle) * this.speed * deltaTime;
+                }
+
+                // Keep car within bounds (simple collision for now)
+                this.x = Math.max(0, Math.min(this.x, canvas.width));
+                this.y = Math.max(0, Math.min(this.y, canvas.height));
+
+                // Trail particles
+                if (this.speed > 50) {
+                    createTrail(this.x, this.y, this.angle + Math.PI, this.speed / 50, this.color1);
+                }
+
+                // Engine sound
+                if (engineSound) {
+                    engineSound.setFrequency(220 + Math.abs(this.speed) * 2); // Adjust frequency based on speed
+                    engineSound.setVolume(Math.min(Math.abs(this.speed) / this.maxSpeed, 1)); // Adjust volume based on speed
+                }
+            }
+
+            draw(ctx, cameraX, cameraY) {
+                ctx.save();
+                ctx.translate(this.x - cameraX, this.y - cameraY);
+                ctx.rotate(this.angle);
+
+                // Car body
+                ctx.fillStyle = this.color1;
+                ctx.fillRect(-this.width / 2, -this.height / 2, this.width, this.height);
+
+                // Windshield
+                ctx.fillStyle = this.color2;
+                ctx.fillRect(-this.width / 4, -this.height / 2 + 5, this.width / 2, 10);
+
+                // Wheels (simplified)
+                ctx.fillStyle = '#000';
+                ctx.fillRect(-this.width / 2 - 5, -this.height / 2, 5, 15);
+                ctx.fillRect(this.width / 2, -this.height / 2, 5, 15);
+                ctx.fillRect(-this.width / 2 - 5, this.height / 2 - 15, 5, 15);
+                ctx.fillRect(this.width / 2, this.height / 2 - 15, 5, 15);
+
+                ctx.restore();
+            }
+        }
+
+        class AiOpponent {
+            constructor(x, y, color1, color2) {
+                this.x = x;
+                this.y = y;
+                this.width = opponentWidth;
+                this.height = opponentHeight;
+                this.angle = 0;
+                this.speed = 100;
+                this.color1 = color1;
+                this.color2 = color2;
+                this.targetX = x;
+                this.targetY = y;
+            }
+
+            update(deltaTime) {
+                // Simple AI: Move towards target, update target when close
+                const dx = this.targetX - this.x;
+                const dy = this.targetY - this.y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+
+                if (distance < 20) {
+                    this.setNewTarget();
+                } else {
+                    this.angle = Math.atan2(dy, dx);
+                    this.x += Math.cos(this.angle) * this.speed * deltaTime;
+                    this.y += Math.sin(this.angle) * this.speed * deltaTime;
+                }
+            }
+
+            setNewTarget() {
+                // Random target within track bounds
+                this.targetX = Math.random() * canvas.width;
+                this.targetY = Math.random() * canvas.height;
+            }
+
+            draw(ctx, cameraX, cameraY) {
+                ctx.save();
+                ctx.translate(this.x - cameraX, this.y - cameraY);
+                ctx.rotate(this.angle);
+
+                // Car body
+                ctx.fillStyle = this.color1;
+                ctx.beginPath();
+                ctx.moveTo(-this.width / 2, this.height / 2);
+                ctx.lineTo(0, -this.height / 2);
+                ctx.lineTo(this.width / 2, this.height / 2);
+                ctx.closePath();
+                ctx.fill();
+
+                // Highlight
+                ctx.fillStyle = this.color2;
+                ctx.beginPath();
+                ctx.moveTo(-this.width / 4, this.height / 4);
+                ctx.lineTo(0, -this.height / 4);
+                ctx.lineTo(this.width / 4, this.height / 4);
+                ctx.closePath();
+                ctx.fill();
+
+                ctx.restore();
+            }
+        }
+
+        class BoostPad {
+            constructor(x, y) {
+                this.x = x;
+                this.y = y;
+                this.radius = boostRadius;
+                this.color1 = neonYellow;
+                this.color2 = neonWhite;
+            }
+
+            draw(ctx, cameraX, cameraY) {
+                const gradient = ctx.createRadialGradient(this.x - cameraX, this.y - cameraY, 0, this.x - cameraX, this.y - cameraY, this.radius);
+                gradient.addColorStop(0, this.color1);
+                gradient.addColorStop(1, this.color2);
+
+                ctx.fillStyle = gradient;
+                ctx.beginPath();
+                ctx.arc(this.x - cameraX, this.y - cameraY, this.radius, 0, Math.PI * 2);
+                ctx.closePath();
+                ctx.fill();
+
+                // Glow effect
+                ctx.shadowColor = this.color1;
+                ctx.shadowBlur = 10;
+                ctx.fill();
+                ctx.shadowBlur = 0;
+            }
+        }
+
+        // Track generation (bezier curves)
+        function createTrack() {
+            return {
+                segments: [
+                    { x: 50, y: 50, controlX1: 50, controlY1: 150, controlX2: 150, controlY2: 150, x2: 150, y2: 50 },
+                    { x: 150, y: 50, controlX1: 150, controlY1: 50, controlX2: 150, controlY2: 150, x2: 250, y2: 150 },
+                    { x: 250, y: 150, controlX1: 250, controlY1: 150, controlX2: 150, controlY2: 150, x2: 150, y2: 250 },
+                    { x: 150, y: 250, controlX1: 150, controlY1: 250, controlX2: 150, controlY2: 150, x2: 50, y2: 150 },
+                    { x: 50, y: 150, controlX1: 50, controlY1: 150, controlX2: 50, controlY2: 50, x2: 50, y2: 50 }
+                ],
+                width: 50
+            };
+        }
+
+        function drawTrack(ctx, track, cameraX, cameraY) {
+            ctx.strokeStyle = trackColor;
+            ctx.lineWidth = track.width;
+            ctx.lineCap = 'round';
+
+            ctx.beginPath();
+            track.segments.forEach((segment, index) => {
+                if (index === 0) {
+                    ctx.moveTo(segment.x - cameraX, segment.y - cameraY);
+                }
+                ctx.bezierCurveTo(
+                    segment.controlX1 - cameraX, segment.controlY1 - cameraY,
+                    segment.controlX2 - cameraX, segment.controlY2 - cameraY,
+                    segment.x2 - cameraX, segment.y2 - cameraY
+                );
+            });
+            ctx.closePath();
+            ctx.stroke();
+
+            // Draw grass/sand edges
+            ctx.strokeStyle = grassColor;
+            ctx.lineWidth = track.width + 40;
+            ctx.stroke();
+
+            ctx.strokeStyle = sandColor;
+            ctx.lineWidth = track.width + 80;
+            ctx.stroke();
+        }
+
+        // Collision Detection
+        function checkCollision(car, boostPad) {
+            const dx = car.x - boostPad.x;
+            const dy = car.y - boostPad.y;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+            return distance < carWidth / 2 + boostPad.radius;
+        }
+
+        // Speedometer
+        function drawSpeedometer(speed) {
+            speedometerCtx.clearRect(0, 0, speedometerCanvas.width, speedometerCanvas.height);
+
+            const centerX = speedometerCanvas.width / 2;
+            const centerY = speedometerCanvas.height;
+            const radius = Math.min(centerX, centerY) * 0.8;
+            const startAngle = Math.PI;
+            const endAngle = 0;
+
+            // Background arc
+            speedometerCtx.beginPath();
+            speedometerCtx.arc(centerX, centerY, radius, startAngle, endAngle, false);
+            speedometerCtx.strokeStyle = '#333';
+            speedometerCtx.lineWidth = 10;
+            speedometerCtx.stroke();
+
+            // Needle angle based on speed
+            const maxSpeed = player.maxSpeed;
+            const speedRatio = Math.min(speed / maxSpeed, 1);
+            const needleAngle = startAngle + (endAngle - startAngle) * speedRatio;
+
+            // Needle
+            speedometerCtx.beginPath();
+            speedometerCtx.moveTo(centerX, centerY);
+            speedometerCtx.lineTo(centerX + Math.cos(needleAngle) * radius * 0.8, centerY + Math.sin(needleAngle) * radius * 0.8);
+            speedometerCtx.strokeStyle = neonRed;
+            speedometerCtx.lineWidth = 5;
+            speedometerCtx.stroke();
+
+            // Center dot
+            speedometerCtx.beginPath();
+            speedometerCtx.arc(centerX, centerY, 5, 0, 2 * Math.PI);
+            speedometerCtx.fillStyle = neonRed;
+            speedometerCtx.fill();
+        }
+
+        // Game Loop
+        function update(time) {
+            if (!gameRunning) return;
+
+            const deltaTime = (time - lastTime) / 1000;
+            lastTime = time;
+
+            // Update game objects
+            player.update(deltaTime);
+            opponents.forEach(opponent => opponent.update(deltaTime));
+            particles.forEach(particle => particle.update(deltaTime));
+            particles = particles.filter(particle => particle.alpha > 0);
+
+            // Camera follows player
+            camera.x = player.x - canvas.width / 2;
+            camera.y = player.y - canvas.height / 2;
+
+            // Collision detection
+            boostPads.forEach((boostPad, index) => {
+                if (checkCollision(player, boostPad)) {
+                    player.speed = Math.min(player.speed + 200, player.maxSpeed * 2);
+                    boostSound.play();
+                    boostPads.splice(index, 1);
+                    createSparkle(boostPad.x, boostPad.y, neonYellow);
+                    score += 100;
+                    scoreDisplay.textContent = 'Score: ' + score;
+                }
+            });
+
+            // Check if player completed a lap
+            if (player.x > 40 && player.x < 60 && player.y > 40 && player.y < 60) {
+                lap++;
+                lapDisplay.textContent = lap;
+                if (lap > totalLaps) {
+                    gameOver(true);
+                }
+            }
+
+            // Draw everything
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            drawTrack(ctx, track, camera.x, camera.y);
+            boostPads.forEach(boostPad => boostPad.draw(ctx, camera.x, camera.y));
+            player.draw(ctx, camera.x, camera.y);
+            opponents.forEach(opponent => opponent.draw(ctx, camera.x, camera.y));
+            particles.forEach(particle => particle.draw(ctx, camera.x, camera.y));
+
+            // Update speedometer
+            drawSpeedometer(player.speed);
+
+            requestAnimationFrame(update);
+        }
+
+        // Game Over
+        function gameOver(win = false) {
+            gameRunning = false;
+            finalScoreDisplay.textContent = score;
+            gameOverScreen.style.display = 'flex';
+            if(engineSound) engineSound.stop();
+
+            if (win) {
+                finalScoreDisplay.textContent = "You Win! Score: " + score;
+            }
+        }
+
+        // Reset Game
+        function resetGame() {
+            score = 0;
+            lap = 1;
+            scoreDisplay.textContent = 'Score: 0';
+            lapDisplay.textContent = '1';
+            player = new Car(100, 100, neonRed, neonWhite);
+            opponents = [new AiOpponent(200, 200, neonPink, neonCyan), new AiOpponent(300, 300, neonCyan, neonYellow)];
+            boostPads = [new BoostPad(150, 100), new BoostPad(200, 200), new BoostPad(100, 200)];
+            particles = [];
+            camera = { x: 0, y: 0 };
+            gameOverScreen.style.display = 'none';
+            startGame();
+        }
+
+        // Start Game
+        function startGame() {
+            gameRunning = true;
+            startScreen.style.display = 'none';
+            lastTime = performance.now();
+            if(engineSound) engineSound.setVolume(0.5); // Start engine sound
+            update(lastTime);
+        }
+
+        // Event Listeners
+        window.addEventListener('keydown', (e) => {
+            keys[e.code] = true;
+            if (e.code === 'Space' && !gameRunning) {
+                if(gameOverScreen.style.display === 'flex'){
+                    resetGame();
+                } else {
+                    startGame();
+                }
+            }
+        });
+
+        window.addEventListener('keyup', (e) => {
+            keys[e.code] = false;
+        });
+
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            speedometerCanvas.width = 200;
+            speedometerCanvas.height = 100;
+            track = createTrack(); // Recreate track on resize
+        }
+
+        window.addEventListener('resize', resizeCanvas);
+
+        // Initialization
+        function init() {
+            initAudio();
+            resizeCanvas();
+            player = new Car(100, 100, neonRed, neonWhite);
+            opponents = [new AiOpponent(200, 200, neonPink, neonCyan), new AiOpponent(300, 300, neonCyan, neonYellow)];
+            boostPads = [new BoostPad(150, 100), new BoostPad(200, 200), new BoostPad(100, 200)];
+            totalLapsDisplay.textContent = totalLaps;
+        }
+
+        init();
+    </script>
+</body>
+</html>

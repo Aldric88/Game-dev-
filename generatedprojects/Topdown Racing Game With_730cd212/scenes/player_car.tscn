@@ -1,0 +1,61 @@
+[gd_scene load_steps=4 format=3]
+
+
+[ext_resource type="Script" path="res://scripts/player_car.gd" id="Script_56c82624a130_1"]
+
+[ext_resource type="Texture2D" path="res://assets/car.png" id="Texture_56c82624a130_0"]
+
+
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_56c82624a130_0"]
+
+size = Vector2(24, 48)
+
+
+
+
+
+[node name="PlayerCar" type="CharacterBody2D"]
+
+script = ExtResource("Script_56c82624a130_1")
+
+
+position = Vector2(0, 0)
+
+rotation = 0.0
+
+linear_damp = 2.0
+
+angular_damp = 2.0
+
+
+
+[node name="Sprite2D" type="Sprite2D" parent="."]
+
+texture = ExtResource("Texture_56c82624a130_0")
+
+
+
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+
+
+shape = SubResource("RectangleShape2D_56c82624a130_0")
+
+
+
+[node name="AnimationPlayer" type="AnimationPlayer" parent="."]
+
+
+
+
+[node name="Camera2D" type="Camera2D" parent="."]
+
+
+
+zoom = Vector2(0.5, 0.5)
+
+position_smoothing_enabled = true
+
+position_smoothing_speed = 5.0
+

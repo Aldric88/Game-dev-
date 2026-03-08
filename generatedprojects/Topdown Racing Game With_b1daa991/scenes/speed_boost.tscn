@@ -1,0 +1,45 @@
+[gd_scene load_steps=5 format=3]
+
+
+[ext_resource type="Script" path="null" id="Script_2a3fcb4c1f06_1"]
+
+[ext_resource type="Texture2D" path="res://assets/speed_boost.png" id="Texture_2a3fcb4c1f06_0"]
+
+[ext_resource type="Texture2D" path="null" id="Texture_2a3fcb4c1f06_1"]
+
+
+
+[sub_resource type="CircleShape2D" id="RectangleShape2D_2a3fcb4c1f06_0"]
+
+
+radius = 16
+
+
+
+
+[node name="SpeedBoost" type="Area2D"]
+
+script = ExtResource("Script_2a3fcb4c1f06_1")
+
+
+monitoring = true
+
+monitorable = true
+
+
+
+[node name="Sprite2D" type="Sprite2D" parent="."]
+
+texture = ExtResource("Texture_2a3fcb4c1f06_0")
+
+
+
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+
+texture = ExtResource("Texture_2a3fcb4c1f06_1")
+
+
+shape = SubResource("RectangleShape2D_2a3fcb4c1f06_0")
+
+

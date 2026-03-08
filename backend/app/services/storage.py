@@ -128,6 +128,75 @@ class StorageManager:
             return self._normalize_doc(doc) if doc else None
         return self._memory_users.get(user_id)
 
+    async def update_user(self, user_id: str, update: dict[str, Any]) -> dict[str, Any] | None:
+        if self.mode == "mongo":
+            await self._mongo_users.update_one({"user_id": user_id}, {"$set": update})
+            return await self.find_user_by_id(user_id)
+        async with self._lock:
+            user = self._memory_users.get(user_id)
+            if user is None:
+                return None
+            user.update(update)
+        return user
+
+    async def delete_user(self, user_id: str) -> bool:
+        if self.mode == "mongo":
+            result = await self._mongo_users.delete_one({"user_id": user_id})
+            return result.deleted_count > 0
+        async with self._lock:
+            if user_id in self._memory_users:
+                del self._memory_users[user_id]
+                return True
+        return False
+
+    async def deduct_credit(self, user_id: str) -> bool:
+        """Atomically deduct one credit. Returns False if no credits remain."""
+        if self.mode == "mongo":
+            result = await self._mongo_users.update_one(
+                {"user_id": user_id, "credits": {"$gt": 0}},
+                {"$inc": {"credits": -1, "credits_used_this_month": 1}},
+            )
+            return result.modified_count > 0
+        async with self._lock:
+            user = self._memory_users.get(user_id)
+            if not user or user.get("credits", 0) <= 0:
+                return False
+            user["credits"] = user.get("credits", 0) - 1
+            user["credits_used_this_month"] = user.get("credits_used_this_month", 0) + 1
+        return True
+
+    async def add_credits(self, user_id: str, amount: int) -> None:
+        if self.mode == "mongo":
+            await self._mongo_users.update_one(
+                {"user_id": user_id},
+                {"$inc": {"credits": amount}},
+            )
+        else:
+            async with self._lock:
+                user = self._memory_users.get(user_id)
+                if user:
+                    user["credits"] = user.get("credits", 0) + amount
+
+    async def reset_all_monthly_credits(self, plan_limits: dict[str, int]) -> None:
+        """Reset credits for all users based on their plan (called monthly)."""
+        if self.mode == "mongo":
+            for plan, limit in plan_limits.items():
+                if limit == -1:
+                    continue
+                await self._mongo_users.update_many(
+                    {"plan": plan},
+                    {"$set": {"credits": limit, "credits_used_this_month": 0}},
+                )
+        else:
+            async with self._lock:
+                for user in self._memory_users.values():
+                    plan = user.get("plan", "free")
+                    limit = plan_limits.get(plan, 10)
+                    if limit == -1:
+                        continue
+                    user["credits"] = limit
+                    user["credits_used_this_month"] = 0
+
     # ── Projects ───────────────────────────────────────────────────────────
 
     async def create_project(self, data: dict[str, Any]) -> dict[str, Any]:

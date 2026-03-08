@@ -1,0 +1,37 @@
+[gd_scene load_steps=3 format=3]
+
+
+[ext_resource type="Texture2D" path="res://assets/neon_sign.png" id="Texture_7d6664e02a62_0"]
+
+
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_7d6664e02a62_0"]
+
+size = Vector2(64, 32)
+
+
+
+
+
+[node name="NeonSign" type="StaticBody2D"]
+
+
+collision_layer = 1
+
+collision_mask = 1
+
+
+
+[node name="Sprite2D" type="Sprite2D" parent="."]
+
+texture = ExtResource("Texture_7d6664e02a62_0")
+
+
+
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+
+
+shape = SubResource("RectangleShape2D_7d6664e02a62_0")
+
+

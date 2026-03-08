@@ -25,8 +25,31 @@ def create_access_token(subject: str, expires_minutes: int | None = None) -> str
     return jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
 
 
+def create_reset_token(data: dict[str, Any]) -> str:
+    expire = datetime.now(timezone.utc) + timedelta(minutes=15)
+    payload = {**data, "exp": expire, "type": "reset"}
+    return jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
+
+
+def create_email_verification_token(data: dict[str, Any]) -> str:
+    expire = datetime.now(timezone.utc) + timedelta(hours=24)
+    payload = {**data, "exp": expire, "type": "email_verify"}
+    return jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
+
+
 def decode_access_token(token: str) -> dict[str, Any]:
     try:
         return jwt.decode(token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm])
     except (JWTError, ValueError):
         raise ValueError("Invalid or expired token")
+
+
+def decode_special_token(token: str, expected_type: str) -> dict[str, Any]:
+    """Decode a reset or email verification token, validating the type claim."""
+    try:
+        payload = jwt.decode(token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm])
+    except (JWTError, ValueError):
+        raise ValueError("Invalid or expired token")
+    if payload.get("type") != expected_type:
+        raise ValueError("Invalid token type")
+    return payload

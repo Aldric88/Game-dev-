@@ -61,5 +61,16 @@ class Settings:
     aws_region: str = os.getenv("AWS_REGION", "us-east-1")
     s3_bucket_name: str = os.getenv("S3_BUCKET_NAME", "")
 
+    redis_url: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+
+    default_credits_free: int = _get_int("DEFAULT_CREDITS_FREE", 10)
+    default_credits_pro: int = _get_int("DEFAULT_CREDITS_PRO", 100)
+
 
 settings = Settings()
+
+PLAN_LIMITS: dict[str, int] = {
+    "free": settings.default_credits_free,
+    "pro": settings.default_credits_pro,
+    "enterprise": -1,  # unlimited
+}

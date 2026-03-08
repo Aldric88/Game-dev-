@@ -1,0 +1,506 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Drift Racer</title>
+<style>
+  body {
+    margin: 0;
+    overflow: hidden;
+    background-color: #0a0a0a;
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Inter', 'Segoe UI', Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    color: #fff;
+  }
+
+  #gameCanvas {
+    background-color: #222;
+    display: block;
+    margin: 0 auto;
+  }
+
+  #ui {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    font-size: 16px;
+  }
+
+  #startScreen, #gameOverScreen {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.8);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+  }
+
+  #startScreen h1, #gameOverScreen h1 {
+    font-size: 3em;
+    margin-bottom: 20px;
+  }
+
+  #startScreen p, #gameOverScreen p {
+    font-size: 1.2em;
+    margin-bottom: 10px;
+  }
+
+  #startScreen button, #gameOverScreen button {
+    padding: 10px 20px;
+    font-size: 1.2em;
+    background-color: #4CAF50;
+    color: white;
+    border: none;
+    cursor: pointer;
+  }
+
+  #gameOverScreen {
+    display: none;
+  }
+</style>
+</head>
+<body>
+  <canvas id="gameCanvas"></canvas>
+  <div id="ui">
+    <div id="speedometer">Speed: 0</div>
+    <div id="lapCounter">Lap: 0 / 3</div>
+    <div id="positionIndicator">Position: 1st</div>
+  </div>
+
+  <div id="startScreen">
+    <h1>Drift Racer</h1>
+    <p>Use Arrow Keys or WASD to steer.</p>
+    <p>Spacebar to Drift.</p>
+    <button onclick="startGame()">Start Game</button>
+  </div>
+
+  <div id="gameOverScreen">
+    <h1>Game Over</h1>
+    <p id="finalScore">Score: 0</p>
+    <button onclick="restartGame()">Restart</button>
+  </div>
+
+  <script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const uiSpeed = document.getElementById('speedometer');
+    const uiLap = document.getElementById('lapCounter');
+    const uiPos = document.getElementById('positionIndicator');
+    const startScreen = document.getElementById('startScreen');
+    const gameOverScreen = document.getElementById('gameOverScreen');
+    const finalScoreDisplay = document.getElementById('finalScore');
+
+    let gameRunning = false;
+    let lastTime = 0;
+    let score = 0;
+    let currentLap = 0;
+    const totalLaps = 3;
+
+    // Audio Context
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+    function beep(frequency, duration) {
+      const oscillator = audioCtx.createOscillator();
+      const gainNode = audioCtx.createGain();
+
+      oscillator.connect(gainNode);
+      gainNode.connect(audioCtx.destination);
+
+      oscillator.type = 'sine';
+      oscillator.frequency.setValueAtTime(frequency, audioCtx.currentTime);
+
+      gainNode.gain.setValueAtTime(0.5, audioCtx.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + duration);
+
+      oscillator.start(audioCtx.currentTime);
+      oscillator.stop(audioCtx.currentTime + duration);
+    }
+
+    // Player Car
+    const player = {
+      x: 150,
+      y: 150,
+      width: 20,
+      height: 40,
+      color: '#FF0000',
+      speed: 0,
+      maxSpeed: 5,
+      acceleration: 0.2,
+      brake: 0.3,
+      turnSpeed: 0.05,
+      angle: 0,
+      drifting: false,
+      driftAngle: 0,
+      driftFactor: 0.95,
+      lives: 3,
+      invincible: false,
+      invincibleTimer: 0
+    };
+
+    // AI Opponent
+    const opponent = {
+      x: 250,
+      y: 250,
+      width: 20,
+      height: 40,
+      color: '#00FF00',
+      speed: 2,
+      angle: 0,
+      path: [],
+      pathIndex: 0
+    };
+
+    // Track Definition (Simple Rectangle)
+    const track = {
+      x: 50,
+      y: 50,
+      width: 500,
+      height: 300,
+      wallWidth: 20,
+      color: '#808080',
+      innerColor: '#333'
+    };
+
+    // Power-up
+    const powerUp = {
+      x: 400,
+      y: 200,
+      radius: 10,
+      color: '#FFD700',
+      active: true
+    };
+
+    // Checkpoints
+    const checkpoints = [
+      { x: 100, y: 70, width: 20, height: 10, passed: false },
+      { x: 530, y: 70, width: 20, height: 10, passed: false },
+      { x: 530, y: 330, width: 20, height: 10, passed: false },
+      { x: 100, y: 330, width: 20, height: 10, passed: false },
+    ];
+
+    // Particles
+    const particles = [];
+
+    // Input Handling
+    const keys = {};
+    window.addEventListener('keydown', function(e) { keys[e.key] = true; });
+    window.addEventListener('keyup', function(e) { keys[e.key] = false; });
+
+    function updatePlayer(deltaTime) {
+      const actualSpeed = player.speed * deltaTime;
+      const actualTurnSpeed = player.turnSpeed * deltaTime;
+
+      if (keys['ArrowUp'] || keys['w']) {
+        player.speed = Math.min(player.speed + player.acceleration, player.maxSpeed);
+      } else if (keys['ArrowDown'] || keys['s']) {
+        player.speed = Math.max(player.speed - player.brake, -player.maxSpeed / 2);
+      } else {
+        player.speed *= 0.95; // Natural deceleration
+      }
+
+      if (keys['ArrowLeft'] || keys['a']) {
+        player.angle -= actualTurnSpeed;
+      }
+      if (keys['ArrowRight'] || keys['d']) {
+        player.angle += actualTurnSpeed;
+      }
+
+      if (keys[' '] && player.speed > 0) {
+        if (!player.drifting) {
+          player.drifting = true;
+          player.driftAngle = player.angle;
+        }
+        player.angle = player.driftAngle;
+        player.speed *= player.driftFactor;
+        score += 1;
+      } else {
+        player.drifting = false;
+      }
+
+      player.x += Math.cos(player.angle) * actualSpeed;
+      player.y += Math.sin(player.angle) * actualSpeed;
+
+      //Invincibility Timer
+      if (player.invincible) {
+          player.invincibleTimer -= deltaTime;
+          if (player.invincibleTimer <= 0) {
+              player.invincible = false;
+          }
+      }
+    }
+
+    function updateOpponent(deltaTime) {
+      if (opponent.path.length === 0) {
+        generateOpponentPath();
+      }
+
+      if (opponent.path.length > 0) {
+        const target = opponent.path[opponent.pathIndex];
+        const dx = target.x - opponent.x;
+        const dy = target.y - opponent.y;
+        const angleToTarget = Math.atan2(dy, dx);
+
+        let angleDifference = angleToTarget - opponent.angle;
+        while (angleDifference > Math.PI) angleDifference -= 2 * Math.PI;
+        while (angleDifference < -Math.PI) angleDifference += 2 * Math.PI;
+
+        opponent.angle += Math.min(Math.max(angleDifference, -0.02), 0.02) * deltaTime * 20; // Adjust turning speed
+
+        opponent.x += Math.cos(opponent.angle) * opponent.speed * deltaTime;
+        opponent.y += Math.sin(opponent.angle) * opponent.speed * deltaTime;
+
+        const distanceToTarget = Math.sqrt(dx * dx + dy * dy);
+        if (distanceToTarget < 10) {
+          opponent.pathIndex = (opponent.pathIndex + 1) % opponent.path.length;
+        }
+      }
+    }
+
+    function generateOpponentPath() {
+      // Simple path around the track
+      opponent.path = [
+        { x: 250, y: 70 },
+        { x: 530, y: 150 },
+        { x: 250, y: 330 },
+        { x: 70, y: 150 }
+      ];
+      opponent.pathIndex = 0;
+    }
+
+    function checkCollisions() {
+      // Track boundaries
+      if (player.x < track.x + track.wallWidth || player.x > track.x + track.width - track.wallWidth ||
+          player.y < track.y + track.wallWidth || player.y > track.y + track.height - track.wallWidth) {
+        player.x = Math.max(track.x + track.wallWidth, Math.min(player.x, track.x + track.width - track.wallWidth));
+        player.y = Math.max(track.y + track.wallWidth, Math.min(player.y, track.y + track.height - track.wallWidth));
+        player.speed = 0;
+        createParticles(player.x, player.y, '#FF0000');
+        if(!player.invincible){
+            player.lives--;
+            player.invincible = true;
+            player.invincibleTimer = 2;
+            beep(200, 0.1);
+        }
+        if (player.lives <= 0) {
+          endGame();
+        }
+      }
+
+      // Opponent Collision
+      const dx = player.x - opponent.x;
+      const dy = player.y - opponent.y;
+      const distance = Math.sqrt(dx * dx + dy * dy);
+
+      if (distance < player.width / 2 + opponent.width / 2) {
+        player.speed = 0;
+        opponent.speed = 0;
+        createParticles(player.x, player.y, '#FFFF00');
+        if(!player.invincible){
+            player.lives--;
+            player.invincible = true;
+            player.invincibleTimer = 2;
+            beep(200, 0.1);
+        }
+        if (player.lives <= 0) {
+          endGame();
+        }
+      }
+
+       // Power-Up Collision
+       if (powerUp.active) {
+        const dx = player.x - powerUp.x;
+        const dy = player.y - powerUp.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+
+        if (distance < player.width / 2 + powerUp.radius) {
+          powerUp.active = false;
+          player.maxSpeed *= 1.5;
+          setTimeout(() => {
+            player.maxSpeed /= 1.5;
+            powerUp.x = Math.random() * (track.width - 2 * track.wallWidth) + track.x + track.wallWidth;
+            powerUp.y = Math.random() * (track.height - 2 * track.wallWidth) + track.y + track.wallWidth;
+            powerUp.active = true;
+          }, 5000);
+          beep(440, 0.2);
+        }
+      }
+    }
+
+    function checkCheckpoints() {
+      for (let i = 0; i < checkpoints.length; i++) {
+        const checkpoint = checkpoints[i];
+        if (!checkpoint.passed &&
+            player.x > checkpoint.x && player.x < checkpoint.x + checkpoint.width &&
+            player.y > checkpoint.y && player.y < checkpoint.y + checkpoint.height) {
+          checkpoint.passed = true;
+          beep(300, 0.1);
+          if (checkpoints.every(cp => cp.passed)) {
+            currentLap++;
+            score += 500; // Award points for completing a lap
+            if (currentLap >= totalLaps) {
+              winGame();
+            }
+            checkpoints.forEach(cp => cp.passed = false); // Reset checkpoints for the next lap
+          }
+          break; // Only one checkpoint can be passed at a time
+        }
+      }
+    }
+
+    function createParticles(x, y, color) {
+      for (let i = 0; i < 10; i++) {
+        particles.push({
+          x: x,
+          y: y,
+          vx: (Math.random() - 0.5) * 5,
+          vy: (Math.random() - 0.5) * 5,
+          radius: Math.random() * 3,
+          color: color,
+          life: 1
+        });
+      }
+    }
+
+    function updateParticles(deltaTime) {
+      for (let i = particles.length - 1; i >= 0; i--) {
+        const p = particles[i];
+        p.x += p.vx * deltaTime * 50;
+        p.y += p.vy * deltaTime * 50;
+        p.life -= 0.02 * deltaTime * 50;
+
+        if (p.life <= 0) {
+          particles.splice(i, 1);
+        }
+      }
+    }
+
+    function drawTrack() {
+      ctx.fillStyle = track.color;
+      ctx.fillRect(track.x, track.y, track.width, track.height);
+      ctx.fillStyle = track.innerColor;
+      ctx.fillRect(track.x + track.wallWidth, track.y + track.wallWidth, track.width - 2 * track.wallWidth, track.height - 2 * track.wallWidth);
+    }
+
+    function drawCar(car) {
+      ctx.save();
+      ctx.translate(car.x, car.y);
+      ctx.rotate(car.angle);
+      ctx.fillStyle = car.color;
+      ctx.fillRect(-car.width / 2, -car.height / 2, car.width, car.height);
+      ctx.restore();
+    }
+
+    function drawPowerUp() {
+      if (powerUp.active) {
+        ctx.beginPath();
+        ctx.arc(powerUp.x, powerUp.y, powerUp.radius, 0, 2 * Math.PI);
+        ctx.fillStyle = powerUp.color;
+        ctx.fill();
+        ctx.closePath();
+      }
+    }
+
+    function drawCheckpoints() {
+      checkpoints.forEach(checkpoint => {
+        ctx.fillStyle = checkpoint.passed ? '#00FF00' : '#FFFF00';
+        ctx.fillRect(checkpoint.x, checkpoint.y, checkpoint.width, checkpoint.height);
+      });
+    }
+
+    function drawParticles() {
+      particles.forEach(p => {
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.radius, 0, 2 * Math.PI);
+        ctx.fillStyle = p.color;
+        ctx.globalAlpha = p.life;
+        ctx.fill();
+        ctx.globalAlpha = 1;
+        ctx.closePath();
+      });
+    }
+
+    function drawUI() {
+      uiSpeed.textContent = `Speed: ${Math.round(player.speed * 10)}`;
+      uiLap.textContent = `Lap: ${currentLap} / ${totalLaps}`;
+      uiPos.textContent = `Lives: ${player.lives}`;
+    }
+
+    function gameLoop(timestamp) {
+      if (!gameRunning) return;
+
+      const deltaTime = (timestamp - lastTime) / 1000;
+      lastTime = timestamp;
+
+      updatePlayer(deltaTime);
+      updateOpponent(deltaTime);
+      checkCollisions();
+      checkCheckpoints();
+      updateParticles(deltaTime);
+
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      drawTrack();
+      drawCar(player);
+      drawCar(opponent);
+      drawPowerUp();
+      drawCheckpoints();
+      drawParticles();
+      drawUI();
+
+      requestAnimationFrame(gameLoop);
+    }
+
+    function startGame() {
+      gameRunning = true;
+      startScreen.style.display = 'none';
+      gameOverScreen.style.display = 'none';
+      player.x = 150;
+      player.y = 150;
+      player.speed = 0;
+      player.angle = 0;
+      player.lives = 3;
+      player.invincible = false;
+      player.invincibleTimer = 0;
+      currentLap = 0;
+      checkpoints.forEach(cp => cp.passed = false);
+      score = 0;
+      opponent.x = 250;
+      opponent.y = 250;
+      opponent.path = [];
+      opponent.pathIndex = 0;
+      generateOpponentPath();
+      powerUp.active = true;
+      requestAnimationFrame(gameLoop);
+    }
+
+    function endGame() {
+      gameRunning = false;
+      gameOverScreen.style.display = 'flex';
+      finalScoreDisplay.textContent = `Score: ${score}`;
+    }
+
+    function winGame() {
+      gameRunning = false;
+      gameOverScreen.style.display = 'flex';
+      finalScoreDisplay.textContent = `You Win! Score: ${score}`;
+    }
+
+    function restartGame() {
+      startGame();
+    }
+
+    function resizeCanvas() {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+    }
+
+    window.addEventListener('resize', resizeCanvas);
+    resizeCanvas();
+  </script>
+</body>
+</html>

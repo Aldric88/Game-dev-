@@ -1,0 +1,41 @@
+[gd_scene load_steps=4 format=3]
+
+
+[ext_resource type="Script" path="res://scripts/power_up.gd" id="Script_2dad6237bdf1_1"]
+
+[ext_resource type="Texture2D" path="res://assets/powerup.png" id="Texture_2dad6237bdf1_0"]
+
+
+
+[sub_resource type="CircleShape2D" id="RectangleShape2D_2dad6237bdf1_0"]
+
+
+radius = 8
+
+
+
+
+[node name="PowerUp" type="Area2D"]
+
+script = ExtResource("Script_2dad6237bdf1_1")
+
+
+gravity_point_unit = false
+
+gravity_enabled = false
+
+
+
+[node name="Sprite2D" type="Sprite2D" parent="."]
+
+texture = ExtResource("Texture_2dad6237bdf1_0")
+
+
+
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+
+
+shape = SubResource("RectangleShape2D_2dad6237bdf1_0")
+
+

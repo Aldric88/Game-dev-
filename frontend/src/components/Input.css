@@ -16,15 +16,15 @@
   padding: 10px 14px;
   font-size: 15px;
   color: var(--text-primary);
-  background: var(--bg-input);
-  border: 1px solid var(--border-primary);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: var(--radius-sm);
-  transition: border-color var(--transition);
+  transition: border-color var(--transition), box-shadow var(--transition);
 }
 
 .input-field:focus {
-  border-color: var(--accent-blue);
-  box-shadow: 0 0 0 3px rgba(41, 151, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.3);
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.04);
 }
 
 .input-field::placeholder {

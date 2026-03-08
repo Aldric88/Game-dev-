@@ -1,0 +1,37 @@
+[gd_scene load_steps=3 format=3]
+
+
+[ext_resource type="Texture2D" path="res://assets/neon_barrier.png" id="Texture_9e8d51e80a4b_0"]
+
+
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_9e8d51e80a4b_0"]
+
+size = Vector2(64, 64)
+
+
+
+
+
+[node name="NeonBarrier" type="StaticBody2D"]
+
+
+collision_layer = 1
+
+collision_mask = 1
+
+
+
+[node name="Sprite2D" type="Sprite2D" parent="."]
+
+texture = ExtResource("Texture_9e8d51e80a4b_0")
+
+
+
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+
+
+shape = SubResource("RectangleShape2D_9e8d51e80a4b_0")
+
+

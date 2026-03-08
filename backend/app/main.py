@@ -13,6 +13,7 @@ from app.api.v1.routes.health import router as health_router
 from app.api.v1.routes.preview import router as preview_router
 from app.api.v1.routes.projects import router as projects_router
 from app.api.v1.routes.s3 import router as s3_router
+from app.api.v1.routes.users import router as users_router
 from app.services.realtime import RealtimeManager
 from app.services.storage import StorageManager
 
@@ -23,7 +24,29 @@ async def lifespan(app: FastAPI):
     await storage.connect()
     app.state.storage = storage
     app.state.realtime = RealtimeManager()
+
+    # Start monthly credit reset scheduler
+    from app.core.config import PLAN_LIMITS
+
+    async def _reset_credits():
+        await storage.reset_all_monthly_credits(PLAN_LIMITS)
+
+    try:
+        from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
+        scheduler = AsyncIOScheduler()
+        scheduler.add_job(_reset_credits, "cron", day=1, hour=0, minute=0)
+        scheduler.start()
+        app.state.scheduler = scheduler
+    except ImportError:
+        import logging
+        logging.getLogger(__name__).warning(
+            "apscheduler not installed — monthly credit reset disabled"
+        )
+
     yield
+    if hasattr(app.state, "scheduler"):
+        app.state.scheduler.shutdown(wait=False)
     await storage.close()
 
 
@@ -50,6 +73,7 @@ async def root() -> dict:
 
 app.include_router(health_router, prefix="/api/v1")
 app.include_router(auth_router, prefix="/api/v1")
+app.include_router(users_router, prefix="/api/v1")
 app.include_router(projects_router, prefix="/api/v1")
 app.include_router(ai_router, prefix="/api/v1")
 app.include_router(dashboard_router, prefix="/api/v1")

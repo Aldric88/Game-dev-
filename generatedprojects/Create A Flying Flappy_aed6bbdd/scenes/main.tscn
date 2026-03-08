@@ -1,0 +1,37 @@
+[gd_scene load_steps=7 format=3 uid="uid://a8381085"]
+
+[ext_resource type="PackedScene" path="res://scenes/bird:_the_player-controlled_character..tscn" id="1"]
+[ext_resource type="PackedScene" path="res://scenes/pipes:_obstacles_that_the_player_must_avoid..tscn" id="2"]
+[ext_resource type="PackedScene" path="res://scenes/ground:_the_lower_boundary_of_the_game..tscn" id="3"]
+[ext_resource type="PackedScene" path="res://scenes/background:_a_static_or_scrolling_image_providing_visual_context..tscn" id="4"]
+[ext_resource type="PackedScene" path="res://scenes/score_text:_displays_the_player's_current_score..tscn" id="5"]
+[ext_resource type="PackedScene" path="res://scenes/game_over_screen:_displays_when_the_player_loses..tscn" id="6"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_a8381085"]
+size = Vector2(1280, 32)
+
+[node name="Main" type="Node2D"]
+
+[node name="Ground" type="StaticBody2D" parent="."]
+position = Vector2(640, 700)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Ground"]
+shape = SubResource("RectangleShape2D_a8381085")
+
+[node name="Bird: The Player-Controlled Character." parent="." instance=ExtResource("1")]
+position = Vector2(100, 600)
+
+[node name="Pipes: Obstacles That The Player Must Avoid." parent="." instance=ExtResource("2")]
+position = Vector2(300, 600)
+
+[node name="Ground: The Lower Boundary Of The Game." parent="." instance=ExtResource("3")]
+position = Vector2(500, 600)
+
+[node name="Background: A Static Or Scrolling Image Providing Visual Context." parent="." instance=ExtResource("4")]
+position = Vector2(700, 600)
+
+[node name="Score Text: Displays The Player'S Current Score." parent="." instance=ExtResource("5")]
+position = Vector2(900, 600)
+
+[node name="Game Over Screen: Displays When The Player Loses." parent="." instance=ExtResource("6")]
+position = Vector2(1100, 600)

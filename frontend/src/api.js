@@ -1,6 +1,48 @@
 const BASE = import.meta.env.VITE_API_BASE_URL || '';
 
-async function request(path, options = {}) {
+// Set to true while a token refresh is in-flight to avoid parallel refresh races.
+let _refreshing = false;
+let _refreshWaiters = [];
+
+function _clearSession() {
+  localStorage.removeItem('token');
+  localStorage.removeItem('user');
+  // Dispatch a custom event so AuthContext (or any listener) can react
+  // without this module needing a direct dependency on React state.
+  window.dispatchEvent(new CustomEvent('auth:logout'));
+}
+
+async function _attemptRefresh() {
+  if (_refreshing) {
+    // Another call is already refreshing — wait for it to finish.
+    return new Promise((resolve, reject) => {
+      _refreshWaiters.push({ resolve, reject });
+    });
+  }
+  _refreshing = true;
+  try {
+    const token = localStorage.getItem('token');
+    if (!token) throw new Error('No token');
+    const res = await fetch(`${BASE}/api/v1/auth/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) throw new Error('Refresh failed');
+    const data = await res.json();
+    localStorage.setItem('token', data.access_token);
+    _refreshWaiters.forEach(({ resolve }) => resolve());
+    return data.access_token;
+  } catch (err) {
+    _refreshWaiters.forEach(({ reject }) => reject(err));
+    _clearSession();
+    throw err;
+  } finally {
+    _refreshing = false;
+    _refreshWaiters = [];
+  }
+}
+
+async function request(path, options = {}, _isRetry = false) {
   const token = localStorage.getItem('token');
   const headers = { 'Content-Type': 'application/json', ...options.headers };
   if (token) headers['Authorization'] = `Bearer ${token}`;
@@ -24,7 +66,17 @@ async function request(path, options = {}) {
   }
 
   if (res.status === 401) {
-    // Don't hard-redirect — let the calling code (AuthContext) handle 401 gracefully
+    // On first 401, attempt a token refresh then retry the original request once.
+    // If the refresh itself fails (expired session), _clearSession() logs the user out.
+    if (!_isRetry && path !== '/api/v1/auth/refresh') {
+      try {
+        await _attemptRefresh();
+        return request(path, options, true);
+      } catch {
+        throw new Error('Session expired. Please log in again.');
+      }
+    }
+    _clearSession();
     throw new Error(data.detail || 'Authentication required');
   }
 
@@ -40,6 +92,10 @@ export const auth = {
     request('/api/v1/auth/login', { method: 'POST', body: JSON.stringify(body) }),
   me: () => request('/api/v1/auth/me'),
   refresh: () => request('/api/v1/auth/refresh', { method: 'POST' }),
+  forgotPassword: (body) =>
+    request('/api/v1/auth/forgot-password', { method: 'POST', body: JSON.stringify(body) }),
+  resetPassword: (body) =>
+    request('/api/v1/auth/reset-password', { method: 'POST', body: JSON.stringify(body) }),
 };
 
 /* ── Projects ── */
@@ -64,6 +120,10 @@ export const ai = {
     request('/api/v1/ai/chat', { method: 'POST', body: JSON.stringify(body) }),
   godotGenerate: (body) =>
     request('/api/v1/ai/godot/generate', { method: 'POST', body: JSON.stringify(body) }),
+  importFiles: (projectId, body) =>
+    request(`/api/v1/ai/import/${projectId}`, { method: 'POST', body: JSON.stringify(body) }),
+  saveCode: (projectId, files) =>
+    request(`/api/v1/ai/code/${projectId}`, { method: 'PATCH', body: JSON.stringify({ files }) }),
 };
 
 /* ── Download ── */
@@ -85,6 +145,13 @@ export const godot = {
     request(`/api/v1/ai/open-folder/${projectId}`, { method: 'POST' }),
   runGodot: (projectId) =>
     request(`/api/v1/ai/run-godot/${projectId}`, { method: 'POST' }),
+};
+
+/* ── Users ── */
+export const users = {
+  getProfile: () => request('/api/v1/users/me'),
+  updateProfile: (body) => request('/api/v1/users/me', { method: 'PATCH', body: JSON.stringify(body) }),
+  getUsage: () => request('/api/v1/users/me/usage'),
 };
 
 /* ── Dashboard ── */

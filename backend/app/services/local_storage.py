@@ -36,8 +36,13 @@ def save_project_files(
     folder = _GENERATED_ROOT / f"{safe_name}_{short_id}"
     folder.mkdir(parents=True, exist_ok=True)
 
+    resolved_folder = folder.resolve()
     for filename, content in files.items():
-        fpath = folder / filename
+        fpath = (folder / filename).resolve()
+        # Guard against path traversal (e.g. filename = "../../etc/passwd")
+        if not fpath.is_relative_to(resolved_folder):
+            logger.warning("Skipping unsafe filename %r — resolves outside project folder", filename)
+            continue
         fpath.parent.mkdir(parents=True, exist_ok=True)
         fpath.write_text(content, encoding="utf-8")
         logger.debug("Saved %s", fpath)
@@ -76,7 +81,15 @@ def zip_project_from_files(project_name: str, files: dict[str, str]) -> bytes:
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         for filename, content in files.items():
-            zf.writestr(f"{safe_name}/{filename}", content)
+            # Normalise the archive entry path to prevent zip-slip attacks.
+            # posixpath.normpath collapses '..' components; we also strip any
+            # leading slashes so the entry is always relative.
+            import posixpath
+            safe_entry = posixpath.normpath(filename).lstrip("/")
+            if safe_entry.startswith(".."):
+                logger.warning("Skipping unsafe archive entry %r", filename)
+                continue
+            zf.writestr(f"{safe_name}/{safe_entry}", content)
     buf.seek(0)
     return buf.read()
 
@@ -101,14 +114,23 @@ def open_project_folder(project_name: str, project_id: str) -> dict[str, Any]:
         return {"success": False, "error": str(e), "path": path_str}
 
 
+def _rglob_bounded(directory: Path, pattern: str, max_depth: int = 3):
+    """rglob with a maximum directory depth to avoid scanning huge trees."""
+    for item in directory.iterdir():
+        if item.is_file() and item.match(pattern):
+            yield item
+        elif item.is_dir() and max_depth > 1:
+            yield from _rglob_bounded(item, pattern, max_depth - 1)
+
+
 def find_godot_executable() -> str | None:
     """Attempt to locate the Godot 4 executable on the system."""
-    # Check PATH first
+    # Check PATH first — fastest and most reliable
     godot = shutil.which("godot") or shutil.which("godot4") or shutil.which("Godot_v4")
     if godot:
         return godot
 
-    # Common install locations (Windows)
+    # Common install locations (Windows) — depth-limited to avoid scanning all of Program Files
     if platform.system() == "Windows":
         search_dirs = [
             Path(os.environ.get("PROGRAMFILES", "C:\\Program Files")),
@@ -121,9 +143,12 @@ def find_godot_executable() -> str | None:
         for d in search_dirs:
             if not d.is_dir():
                 continue
-            for exe in d.rglob("Godot*.exe"):
-                if "console" not in exe.name.lower():
-                    return str(exe)
+            try:
+                for exe in _rglob_bounded(d, "Godot*.exe", max_depth=3):
+                    if "console" not in exe.name.lower():
+                        return str(exe)
+            except PermissionError:
+                continue
 
     # macOS
     elif platform.system() == "Darwin":

@@ -8,6 +8,7 @@ Wraps the shared ``provider_manager`` so every agent gets:
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from app.services.ai_providers import ProviderUsage, provider_manager
@@ -26,26 +27,66 @@ class BaseAgent:
         return result.text
 
     def extract_json(self, text: str) -> dict[str, Any]:
-        """Strip markdown fences and parse the first JSON object found."""
+        """Strip markdown fences and parse the first complete JSON object.
+
+        Uses an iterative bracket-depth scan rather than recursion or rfind so
+        that text containing multiple JSON objects (e.g. preamble + real payload)
+        always yields the *first* well-formed object, and deep/malformed LLM
+        responses cannot cause a stack overflow.
+        """
         text = text.strip()
-        # Remove markdown fences
+
+        # Remove markdown code fences (```json ... ``` or ``` ... ```)
         if text.startswith("```"):
-            lines = text.splitlines()
-            lines = [l for l in lines if not l.startswith("```")]
+            lines = [l for l in text.splitlines() if not l.startswith("```")]
             text = "\n".join(lines).strip()
 
+        # Fast path: the whole text is valid JSON
         try:
             return json.loads(text)
         except json.JSONDecodeError:
             pass
 
-        # Try to find first { ... } block
-        start = text.find("{")
-        end = text.rfind("}")
-        if start != -1 and end != -1 and end > start:
-            try:
-                return json.loads(text[start : end + 1])
-            except json.JSONDecodeError:
-                pass
+        # Iterative bracket-depth scan: try every '{' until we find a
+        # well-formed JSON object (handles malformed preamble objects).
+        search_from = 0
+        while True:
+            start = text.find("{", search_from)
+            if start == -1:
+                return {}
 
-        return {}
+            depth = 0
+            in_string = False
+            escape_next = False
+            end = -1
+
+            for i, ch in enumerate(text[start:], start=start):
+                if escape_next:
+                    escape_next = False
+                    continue
+                if ch == "\\" and in_string:
+                    escape_next = True
+                    continue
+                if ch == '"':
+                    in_string = not in_string
+                    continue
+                if in_string:
+                    continue
+                if ch == "{":
+                    depth += 1
+                elif ch == "}":
+                    depth -= 1
+                    if depth == 0:
+                        end = i
+                        break
+
+            if end == -1:
+                # No matching closing brace found at all
+                return {}
+
+            candidate = text[start : end + 1]
+            try:
+                return json.loads(candidate)
+            except json.JSONDecodeError:
+                # This object was malformed — advance past it and try the next
+                search_from = end + 1

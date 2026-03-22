@@ -14,31 +14,53 @@ export function AuthProvider({ children }) {
   });
   const [loading, setLoading] = useState(true);
 
+  // Keep React state in sync when api.js forces a session clear (401 refresh failure).
+  useEffect(() => {
+    const handleLogout = () => {
+      setUser(null);
+    };
+    window.addEventListener('auth:logout', handleLogout);
+    return () => window.removeEventListener('auth:logout', handleLogout);
+  }, []);
+
   useEffect(() => {
     const token = localStorage.getItem('token');
     if (!token) {
       setLoading(false);
       return;
     }
-    authApi.me()
-      .then((u) => {
+
+    const initSession = async () => {
+      try {
+        const u = await authApi.me();
         if (u) {
           setUser(u);
           localStorage.setItem('user', JSON.stringify(u));
-        } else {
-          // Token invalid or expired
-          localStorage.removeItem('token');
-          localStorage.removeItem('user');
-          setUser(null);
+          return;
         }
-      })
-      .catch(() => {
-        // 401 or network error — clear stale session
-        localStorage.removeItem('token');
-        localStorage.removeItem('user');
-        setUser(null);
-      })
-      .finally(() => setLoading(false));
+      } catch {
+        // /me failed — try refreshing the token once before giving up
+        try {
+          const refreshed = await authApi.refresh();
+          if (refreshed?.access_token) {
+            localStorage.setItem('token', refreshed.access_token);
+            if (refreshed.user) {
+              setUser(refreshed.user);
+              localStorage.setItem('user', JSON.stringify(refreshed.user));
+              return;
+            }
+          }
+        } catch {
+          // Refresh also failed — session is truly invalid
+        }
+      }
+      // Clear stale session
+      localStorage.removeItem('token');
+      localStorage.removeItem('user');
+      setUser(null);
+    };
+
+    initSession().finally(() => setLoading(false));
   }, []);
 
   const login = useCallback(async (email, password) => {

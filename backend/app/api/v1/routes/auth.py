@@ -22,25 +22,81 @@ from app.schemas.auth import (
     ResetPasswordRequest,
     UserPublic,
 )
+from app.core.config import settings
 from app.services.storage import StorageManager
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 logger = logging.getLogger(__name__)
 
-# ── In-memory login brute-force protection ─────────────────────────────
-_login_failures: dict[str, list[float]] = {}
+# ── Login brute-force protection ───────────────────────────────────────────────
+# Uses Redis when REDIS_URL is configured (cross-worker safe).
+# Gracefully falls back to a process-local dict when Redis is unavailable.
+import time as _time
+
+_login_failures: dict[str, list[float]] = {}   # in-memory fallback store
 _LOCKOUT_THRESHOLD = 5
-_LOCKOUT_WINDOW = 900  # 15 minutes
+_LOCKOUT_WINDOW = 900  # 15 minutes in seconds
+_BF_REDIS_PREFIX = "bf:"
+
+
+def _get_bf_redis_client():
+    """Return a synchronous Redis client or None if Redis is not configured/reachable."""
+    redis_url = settings.redis_url.strip()
+    if not redis_url:
+        return None
+    try:
+        import certifi
+        import redis as _redis
+        extra: dict = {}
+        if redis_url.startswith("rediss://"):
+            extra["ssl_ca_certs"] = certifi.where()
+        client = _redis.from_url(
+            redis_url,
+            socket_connect_timeout=1,
+            decode_responses=True,
+            **extra,
+        )
+        client.ping()
+        return client
+    except Exception as exc:
+        logger.warning(
+            "Brute-force protection: Redis unavailable (%s), using in-memory fallback.", exc
+        )
+        return None
+
+
+# Resolved once at import time; None means use the in-memory fallback.
+_bf_redis = _get_bf_redis_client()
 
 
 def _check_login_lockout(email: str) -> None:
-    import time
+    global _bf_redis
+    key = _BF_REDIS_PREFIX + email
 
-    now = time.time()
-    attempts = _login_failures.get(email, [])
-    # Keep only attempts within the window
-    attempts = [t for t in attempts if now - t < _LOCKOUT_WINDOW]
+    if _bf_redis is not None:
+        try:
+            count = _bf_redis.get(key)
+            if count is not None and int(count) >= _LOCKOUT_THRESHOLD:
+                ttl = _bf_redis.ttl(key)
+                wait_mins = max(1, ttl // 60) if ttl > 0 else _LOCKOUT_WINDOW // 60
+                raise HTTPException(
+                    status_code=403,
+                    detail=(
+                        f"Account locked due to too many failed login attempts. "
+                        f"Try again in {wait_mins} minute(s)."
+                    ),
+                )
+            return
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.warning("Brute-force Redis check failed (%s), using in-memory.", exc)
+            _bf_redis = None  # stop trying Redis for this worker's lifetime
+
+    # ── in-memory fallback ──
+    now = _time.time()
+    attempts = [t for t in _login_failures.get(email, []) if now - t < _LOCKOUT_WINDOW]
     _login_failures[email] = attempts
     if len(attempts) >= _LOCKOUT_THRESHOLD:
         raise HTTPException(
@@ -50,16 +106,39 @@ def _check_login_lockout(email: str) -> None:
 
 
 def _record_login_failure(email: str) -> None:
-    import time
+    global _bf_redis
+    key = _BF_REDIS_PREFIX + email
 
-    now = time.time()
+    if _bf_redis is not None:
+        try:
+            pipe = _bf_redis.pipeline()
+            pipe.incr(key)
+            pipe.expire(key, _LOCKOUT_WINDOW)
+            pipe.execute()
+            return
+        except Exception as exc:
+            logger.warning("Brute-force Redis record failed (%s), using in-memory.", exc)
+            _bf_redis = None
+
+    # ── in-memory fallback ──
+    now = _time.time()
     attempts = _login_failures.setdefault(email, [])
     attempts.append(now)
-    # Prune old
     _login_failures[email] = [t for t in attempts if now - t < _LOCKOUT_WINDOW]
 
 
 def _clear_login_failures(email: str) -> None:
+    global _bf_redis
+    key = _BF_REDIS_PREFIX + email
+
+    if _bf_redis is not None:
+        try:
+            _bf_redis.delete(key)
+            return
+        except Exception as exc:
+            logger.warning("Brute-force Redis clear failed (%s), using in-memory.", exc)
+            _bf_redis = None
+
     _login_failures.pop(email, None)
 
 
@@ -67,29 +146,13 @@ def _normalize_email(email: str) -> str:
     return email.strip().lower()
 
 
-def _to_user_public(user: dict) -> UserPublic:
-    return UserPublic(
-        user_id=user.get("user_id", ""),
-        username=user.get("username", ""),
-        email=user.get("email", ""),
-        full_name=user.get("full_name", ""),
-        phone=user.get("phone", ""),
-        subscription_tier=user.get("subscription_tier", "free"),
-        email_verified=user.get("email_verified", False),
-        plan=user.get("plan", "free"),
-        credits=user.get("credits", 0),
-        created_at=user.get("created_at", ""),
-    )
-
 
 @router.post("/register", status_code=status.HTTP_201_CREATED, response_model=AuthTokenResponse)
 async def register(
     request: RegisterRequest,
     storage: StorageManager = Depends(get_storage),
 ) -> AuthTokenResponse:
-    email = _normalize_email(request.email)
-    if "@" not in email:
-        raise HTTPException(status_code=400, detail="Enter a valid email address")
+    email = _normalize_email(str(request.email))
 
     if await storage.find_user_by_email(email):
         raise HTTPException(status_code=400, detail="Email already exists")
@@ -124,7 +187,7 @@ async def register(
     logger.info("Email verification link: /api/v1/auth/verify-email/%s", verification_token)
 
     token = create_access_token(user["user_id"])
-    return AuthTokenResponse(access_token=token, token_type="bearer", user=_to_user_public(user))
+    return AuthTokenResponse(access_token=token, token_type="bearer", user=UserPublic.from_db(user))
 
 
 @router.post("/login", response_model=AuthTokenResponse)
@@ -140,22 +203,22 @@ async def login(
     user = await storage.find_user_by_email(email)
     if not user or not verify_password(request.password, user.get("password_hash", "")):
         _record_login_failure(email)
-        raise HTTPException(status_code=400, detail="Invalid email or password")
+        raise HTTPException(status_code=401, detail="Invalid email or password")
 
     _clear_login_failures(email)
     token = create_access_token(user["user_id"])
-    return AuthTokenResponse(access_token=token, token_type="bearer", user=_to_user_public(user))
+    return AuthTokenResponse(access_token=token, token_type="bearer", user=UserPublic.from_db(user))
 
 
 @router.get("/me", response_model=UserPublic)
 async def me(current_user: dict = Depends(get_current_user)) -> UserPublic:
-    return _to_user_public(current_user)
+    return UserPublic.from_db(current_user)
 
 
 @router.post("/refresh", response_model=AuthTokenResponse)
 async def refresh(current_user: dict = Depends(get_current_user)) -> AuthTokenResponse:
     token = create_access_token(current_user["user_id"])
-    return AuthTokenResponse(access_token=token, token_type="bearer", user=_to_user_public(current_user))
+    return AuthTokenResponse(access_token=token, token_type="bearer", user=UserPublic.from_db(current_user))
 
 
 @router.post("/logout")
@@ -170,15 +233,14 @@ async def forgot_password(
 ) -> dict:
     email = _normalize_email(request.email)
     user = await storage.find_user_by_email(email)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-
-    reset_token = create_reset_token({
-        "user_id": user["user_id"],
-        "email": user["email"],
-    })
-    logger.info("Password reset token: %s", reset_token)
-    return {"message": "Password reset token generated (check server console)"}
+    # Always return 200 to avoid leaking whether the email exists
+    if user:
+        reset_token = create_reset_token({
+            "user_id": user["user_id"],
+            "email": user["email"],
+        })
+        logger.info("Password reset token for %s: %s", email, reset_token)
+    return {"message": "If that email is registered you will receive a reset token (check server console)"}
 
 
 @router.post("/reset-password")

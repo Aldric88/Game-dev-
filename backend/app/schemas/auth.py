@@ -5,29 +5,29 @@ from pydantic import BaseModel, EmailStr, Field
 
 
 class RegisterRequest(BaseModel):
-    username: str
-    email: str
-    password: str
-    full_name: str = ""
-    phone: str = ""
+    username: str = Field(..., min_length=3, max_length=30, pattern=r'^[a-zA-Z0-9_]+$')
+    email: EmailStr
+    password: str = Field(..., min_length=8, max_length=128)
+    full_name: str = Field(default="", max_length=100)
+    phone: str = Field(default="", max_length=20)
 
 
 class LoginRequest(BaseModel):
-    email: str
+    email: EmailStr
     password: str
 
 
 class ForgotPasswordRequest(BaseModel):
-    email: str
+    email: EmailStr
 
 
 class ResetPasswordRequest(BaseModel):
     token: str
-    new_password: str
+    new_password: str = Field(..., min_length=8, max_length=128)
 
 
 class ResendVerificationRequest(BaseModel):
-    email: str
+    email: EmailStr
 
 
 class UserPublic(BaseModel):
@@ -41,6 +41,22 @@ class UserPublic(BaseModel):
     plan: str = "free"
     credits: int = 0
     created_at: str = ""
+
+    @classmethod
+    def from_db(cls, user: dict) -> "UserPublic":
+        """Build a UserPublic from a raw storage dict."""
+        return cls(
+            user_id=user.get("user_id", ""),
+            username=user.get("username", ""),
+            email=user.get("email", ""),
+            full_name=user.get("full_name", ""),
+            phone=user.get("phone", ""),
+            subscription_tier=user.get("subscription_tier", "free"),
+            email_verified=user.get("email_verified", False),
+            plan=user.get("plan", "free"),
+            credits=user.get("credits", 0),
+            created_at=user.get("created_at", ""),
+        )
 
 
 class UserUpdateRequest(BaseModel):

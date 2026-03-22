@@ -8,7 +8,9 @@ folder and projects are easy to locate.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
+import mimetypes
 from typing import Any
 
 import boto3
@@ -59,21 +61,17 @@ class S3StorageService:
         """
         key = self._make_key(username, project_name, filename)
 
-        content_type = "text/plain"
-        if filename.endswith(".html"):
-            content_type = "text/html"
-        elif filename.endswith(".css"):
-            content_type = "text/css"
-        elif filename.endswith(".js"):
-            content_type = "application/javascript"
-        elif filename.endswith(".json"):
-            content_type = "application/json"
+        guessed, _ = mimetypes.guess_type(filename)
+        content_type = guessed or "text/plain"
 
+        body = content.encode("utf-8")
+        client = self._get_client()
         try:
-            self._get_client().put_object(
+            await asyncio.to_thread(
+                client.put_object,
                 Bucket=self.bucket,
                 Key=key,
-                Body=content.encode("utf-8"),
+                Body=body,
                 ContentType=content_type,
             )
             url = f"https://{self.bucket}.s3.{settings.aws_region}.amazonaws.com/{key}"
@@ -96,8 +94,10 @@ class S3StorageService:
         UTF-8 text.  Returns ``{"key": ..., "url": ...}`` on success.
         """
         key = self._make_key(username, project_name, filename)
+        client = self._get_client()
         try:
-            self._get_client().put_object(
+            await asyncio.to_thread(
+                client.put_object,
                 Bucket=self.bucket,
                 Key=key,
                 Body=data,
@@ -129,8 +129,11 @@ class S3StorageService:
     async def list_user_files(self, username: str) -> list[dict[str, Any]]:
         """List all objects under a user's folder."""
         prefix = f"{username}/"
+        client = self._get_client()
         try:
-            resp = self._get_client().list_objects_v2(Bucket=self.bucket, Prefix=prefix)
+            resp = await asyncio.to_thread(
+                client.list_objects_v2, Bucket=self.bucket, Prefix=prefix
+            )
             files = []
             for obj in resp.get("Contents", []):
                 files.append({
@@ -146,8 +149,11 @@ class S3StorageService:
     async def list_project_files(self, username: str, project_name: str) -> list[dict[str, Any]]:
         """List all objects under a specific project folder."""
         prefix = f"{username}/{project_name}/"
+        client = self._get_client()
         try:
-            resp = self._get_client().list_objects_v2(Bucket=self.bucket, Prefix=prefix)
+            resp = await asyncio.to_thread(
+                client.list_objects_v2, Bucket=self.bucket, Prefix=prefix
+            )
             files = []
             for obj in resp.get("Contents", []):
                 files.append({
@@ -166,8 +172,10 @@ class S3StorageService:
         if not files:
             return 0
         objects = [{"Key": f["key"]} for f in files]
+        client = self._get_client()
         try:
-            resp = self._get_client().delete_objects(
+            resp = await asyncio.to_thread(
+                client.delete_objects,
                 Bucket=self.bucket,
                 Delete={"Objects": objects},
             )
@@ -181,7 +189,9 @@ class S3StorageService:
 
     async def get_presigned_url(self, key: str, expires_in: int = 3600) -> str:
         """Generate a presigned URL for downloading a private object."""
-        return self._get_client().generate_presigned_url(
+        client = self._get_client()
+        return await asyncio.to_thread(
+            client.generate_presigned_url,
             "get_object",
             Params={"Bucket": self.bucket, "Key": key},
             ExpiresIn=expires_in,

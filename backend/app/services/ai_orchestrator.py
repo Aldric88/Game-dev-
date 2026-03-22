@@ -45,15 +45,38 @@ async def _emit(realtime: Any, project_id: str, event: str, payload: Any = None)
         pass
 
 
+def _sanitize_name(raw: str) -> str:
+    """Strip descriptions, special chars, and produce a clean short entity name.
+
+    Examples:
+        "Bird: The Player-Controlled Character." → "Bird"
+        "Score Text: Displays The Player's Score"  → "Score Text"
+        "AI Opponent Car"                          → "Ai Opponent Car"
+    """
+    import re
+    # Strip everything after a colon, period-at-end, or parenthetical
+    name = re.split(r"[:\.\(\)\[\]]", raw)[0].strip()
+    # Remove any remaining non-alphanumeric characters (except spaces and hyphens)
+    name = re.sub(r"[^a-zA-Z0-9 \-]", "", name).strip()
+    # Collapse multiple spaces
+    name = re.sub(r"\s+", " ", name)
+    # Limit to first 3 words max to keep names short
+    words = name.split()
+    if len(words) > 3:
+        name = " ".join(words[:3])
+    return name.strip().title() if name else "Entity"
+
+
 def _normalize_entity(entity: Any) -> dict[str, Any]:
     """Coerce a string or partial dict entity entry to a full descriptor."""
     if isinstance(entity, dict):
+        raw_name = entity.get("name", "Entity")
         return {
-            "name": entity.get("name", "Entity").strip().title(),
+            "name": _sanitize_name(raw_name),
             "type": entity.get("type", "character"),
             "behaviors": entity.get("behaviors", entity.get("components", ["movement", "physics"])),
         }
-    name = str(entity).strip().title()
+    name = _sanitize_name(str(entity))
     lower = name.lower()
 
     # Extended keyword matching for better entity type inference
@@ -65,12 +88,13 @@ def _normalize_entity(entity: Any) -> dict[str, Any]:
         return {"name": name, "type": "trigger", "behaviors": ["detection"]}
     if any(k in lower for k in ("boost", "power", "shield", "speed")):
         return {"name": name, "type": "collectible", "behaviors": ["idle", "pickup", "respawn"]}
-    if any(k in lower for k in ("pipe", "obstacle", "wall", "platform", "ground")):
-        return {"name": name, "type": "obstacle", "behaviors": ["static"]}
     if any(k in lower for k in ("score", "hud", "ui", "health", "timer", "display")):
         return {"name": name, "type": "ui", "behaviors": ["display"]}
+    # Background MUST be checked before ground/obstacle (substring collision)
     if any(k in lower for k in ("background", "sky", "scenery")):
         return {"name": name, "type": "environment", "behaviors": ["parallax"]}
+    if any(k in lower for k in ("pipe", "obstacle", "wall", "platform", "ground")):
+        return {"name": name, "type": "obstacle", "behaviors": ["static"]}
     if any(k in lower for k in ("bullet", "projectile", "laser", "missile")):
         return {"name": name, "type": "projectile", "behaviors": ["movement", "damage"]}
     if any(k in lower for k in ("bird", "ship", "plane", "hero", "fighter")):
@@ -90,8 +114,40 @@ def _normalize_entity(entity: Any) -> dict[str, Any]:
     return {"name": name, "type": etype, "behaviors": behaviors}
 
 
-def _generate_project_config(game_name: str) -> str:
+def _generate_project_config(game_name: str, game_type: str = "arcade") -> str:
     """Return a valid Godot 4.2 project.godot configuration string."""
+
+    # Add additional input maps for specific game types
+    extra_inputs = ""
+    if game_type in ("racing", "topdown", "snake", "survival"):
+        extra_inputs = """
+move_up={{
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"resource_local_to_scene":false,"resource_name":"","device":-1,"window_id":0,"alt_pressed":false,"shift_pressed":false,"ctrl_pressed":false,"meta_pressed":false,"pressed":false,"keycode":0,"physical_keycode":87,"key_label":0,"unicode":119,"location":0,"echo":false,"script":null), Object(InputEventKey,"resource_local_to_scene":false,"resource_name":"","device":-1,"window_id":0,"alt_pressed":false,"shift_pressed":false,"ctrl_pressed":false,"meta_pressed":false,"pressed":false,"keycode":0,"physical_keycode":4194320,"key_label":0,"unicode":0,"location":0,"echo":false,"script":null)]
+}}
+move_down={{
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"resource_local_to_scene":false,"resource_name":"","device":-1,"window_id":0,"alt_pressed":false,"shift_pressed":false,"ctrl_pressed":false,"meta_pressed":false,"pressed":false,"keycode":0,"physical_keycode":83,"key_label":0,"unicode":115,"location":0,"echo":false,"script":null), Object(InputEventKey,"resource_local_to_scene":false,"resource_name":"","device":-1,"window_id":0,"alt_pressed":false,"shift_pressed":false,"ctrl_pressed":false,"meta_pressed":false,"pressed":false,"keycode":0,"physical_keycode":4194322,"key_label":0,"unicode":0,"location":0,"echo":false,"script":null)]
+}}
+shoot={{
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"resource_local_to_scene":false,"resource_name":"","device":-1,"window_id":0,"alt_pressed":false,"shift_pressed":false,"ctrl_pressed":false,"meta_pressed":false,"pressed":false,"keycode":0,"physical_keycode":90,"key_label":0,"unicode":122,"location":0,"echo":false,"script":null)]
+}}"""
+    elif game_type in ("shooter", "space_shooter"):
+        extra_inputs = """
+move_up={{
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"resource_local_to_scene":false,"resource_name":"","device":-1,"window_id":0,"alt_pressed":false,"shift_pressed":false,"ctrl_pressed":false,"meta_pressed":false,"pressed":false,"keycode":0,"physical_keycode":87,"key_label":0,"unicode":119,"location":0,"echo":false,"script":null), Object(InputEventKey,"resource_local_to_scene":false,"resource_name":"","device":-1,"window_id":0,"alt_pressed":false,"shift_pressed":false,"ctrl_pressed":false,"meta_pressed":false,"pressed":false,"keycode":0,"physical_keycode":4194320,"key_label":0,"unicode":0,"location":0,"echo":false,"script":null)]
+}}
+move_down={{
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"resource_local_to_scene":false,"resource_name":"","device":-1,"window_id":0,"alt_pressed":false,"shift_pressed":false,"ctrl_pressed":false,"meta_pressed":false,"pressed":false,"keycode":0,"physical_keycode":83,"key_label":0,"unicode":115,"location":0,"echo":false,"script":null), Object(InputEventKey,"resource_local_to_scene":false,"resource_name":"","device":-1,"window_id":0,"alt_pressed":false,"shift_pressed":false,"ctrl_pressed":false,"meta_pressed":false,"pressed":false,"keycode":0,"physical_keycode":4194322,"key_label":0,"unicode":0,"location":0,"echo":false,"script":null)]
+}}
+shoot={{
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"resource_local_to_scene":false,"resource_name":"","device":-1,"window_id":0,"alt_pressed":false,"shift_pressed":false,"ctrl_pressed":false,"meta_pressed":false,"pressed":false,"keycode":0,"physical_keycode":32,"key_label":0,"unicode":32,"location":0,"echo":false,"script":null), Object(InputEventKey,"resource_local_to_scene":false,"resource_name":"","device":-1,"window_id":0,"alt_pressed":false,"shift_pressed":false,"ctrl_pressed":false,"meta_pressed":false,"pressed":false,"keycode":0,"physical_keycode":90,"key_label":0,"unicode":122,"location":0,"echo":false,"script":null)]
+}}"""
+
     return f"""; Engine configuration file.
 ; Generated by AI Game Dev IDE.
 ;
@@ -127,7 +183,7 @@ move_left={{
 jump={{
 "deadzone": 0.5,
 "events": [Object(InputEventKey,"resource_local_to_scene":false,"resource_name":"","device":-1,"window_id":0,"alt_pressed":false,"shift_pressed":false,"ctrl_pressed":false,"meta_pressed":false,"pressed":false,"keycode":0,"physical_keycode":32,"key_label":0,"unicode":32,"location":0,"echo":false,"script":null), Object(InputEventKey,"resource_local_to_scene":false,"resource_name":"","device":-1,"window_id":0,"alt_pressed":false,"shift_pressed":false,"ctrl_pressed":false,"meta_pressed":false,"pressed":false,"keycode":0,"physical_keycode":87,"key_label":0,"unicode":119,"location":0,"echo":false,"script":null)]
-}}
+}}{extra_inputs}
 
 [layer_names]
 
@@ -142,7 +198,23 @@ textures/canvas_textures/default_texture_filter=0
 """
 
 
-def _generate_main_scene(entities: list[dict[str, Any]]) -> str:
+def _safe_filename(name: str) -> str:
+    """Convert entity name to a safe lowercase filename slug."""
+    import re
+    slug = name.lower().replace(" ", "_").replace("-", "_")
+    slug = re.sub(r"[^a-z0-9_]", "", slug)
+    slug = re.sub(r"_+", "_", slug).strip("_")
+    return slug or "entity"
+
+
+def _safe_node_name(name: str) -> str:
+    """Convert entity name to a valid Godot node name (PascalCase, no special chars)."""
+    import re
+    cleaned = re.sub(r"[^a-zA-Z0-9 ]", "", name)
+    return cleaned.replace(" ", "") or "Entity"
+
+
+def _generate_main_scene(entities: list[dict[str, Any]], game_type: str = "arcade") -> str:
     """Return a minimal main.tscn that provides a ground and instances entities."""
     uid = uuid4().hex[:8]
     shape_id = f"RectangleShape2D_{uid}"
@@ -150,18 +222,43 @@ def _generate_main_scene(entities: list[dict[str, Any]]) -> str:
 
     ext_res_lines = []
     for i, entity in enumerate(entities):
-        name = entity.get("name", f"Entity{i}").lower().replace(" ", "_")
+        fname = _safe_filename(entity.get("name", f"Entity{i}"))
         ext_res_lines.append(
-            f'[ext_resource type="PackedScene" path="res://scenes/{name}.tscn" id="{i + 1}"]'
+            f'[ext_resource type="PackedScene" path="res://scenes/{fname}.tscn" id="{i + 1}"]'
         )
 
+    # Position entities based on their type for better layout
     instance_lines = []
     for i, entity in enumerate(entities):
-        ename = entity.get("name", f"Entity{i}")
-        x_pos = 100 + i * 200
+        node_name = _safe_node_name(entity.get("name", f"Entity{i}"))
+        etype = entity.get("type", "character").lower()
+
+        # Smart positioning based on entity type and game type
+        if etype in ("ui", "display"):
+            x_pos, y_pos = 640, 40  # Top center for UI
+        elif etype in ("environment", "background"):
+            x_pos, y_pos = 640, 360  # Center for backgrounds
+        elif etype in ("character", "player", "vehicle"):
+            if game_type == "flappy":
+                x_pos, y_pos = 120, 300  # Left side for flappy bird
+            elif game_type == "racing":
+                x_pos, y_pos = 640, 500  # Bottom center for racing
+            else:
+                x_pos, y_pos = 200, 500  # Left area for player
+        elif etype in ("enemy", "boss"):
+            x_pos, y_pos = 800 + i * 100, 500  # Right side for enemies
+        elif etype in ("obstacle",):
+            x_pos, y_pos = 400 + i * 150, 400  # Mid area for obstacles
+        elif etype in ("collectible", "trigger"):
+            x_pos, y_pos = 300 + i * 120, 350  # Scattered for collectibles
+        elif etype in ("projectile",):
+            x_pos, y_pos = 0, -100  # Off-screen for projectile templates
+        else:
+            x_pos, y_pos = 100 + i * 200, 500
+
         instance_lines.append(
-            f'[node name="{ename}" parent="." instance=ExtResource("{i + 1}")]\n'
-            f"position = Vector2({x_pos}, 600)"
+            f'[node name="{node_name}" parent="." instance=ExtResource("{i + 1}")]\n'
+            f"position = Vector2({x_pos}, {y_pos})"
         )
 
     ext_res_block = "\n".join(ext_res_lines)
@@ -1053,7 +1150,7 @@ requestAnimationFrame(gameLoop);
         asset_map: dict[str, dict] = {}
 
         for i, entity in enumerate(entities):
-            ename = entity["name"].lower().replace(" ", "_")
+            ename = _safe_filename(entity["name"])
             # Scripts
             res = all_results[i]
             if isinstance(res, Exception):
@@ -1103,8 +1200,8 @@ requestAnimationFrame(gameLoop);
         files["index.html"] = html_game
 
         # Godot project files
-        files["project.godot"] = _generate_project_config(game_name)
-        files["scenes/main.tscn"] = _generate_main_scene(entities)
+        files["project.godot"] = _generate_project_config(game_name, design_doc.get("game_type", "arcade"))
+        files["scenes/main.tscn"] = _generate_main_scene(entities, design_doc.get("game_type", "arcade"))
         files["icon.svg"] = _generate_icon_svg()
         files["README.md"] = _generate_readme(
             design_doc.get("game_type", "arcade"),
@@ -1310,7 +1407,7 @@ requestAnimationFrame(gameLoop);
         # Build entity descriptions with their behaviors from GDScript analysis
         entity_descriptions = []
         for entity in entities:
-            ename = entity["name"].lower().replace(" ", "_")
+            ename = _safe_filename(entity["name"])
             script_code = script_map.get(ename, "")
             asset_data = asset_map.get(ename, {})
             spec = asset_data.get("spec", {}) if isinstance(asset_data, dict) else {}
@@ -1486,7 +1583,7 @@ The game MUST be immediately playable, visually polished, and FUN when loaded in
 
         sprite_map: dict[str, dict] = {}
         for i, res in enumerate(asset_results):
-            ename = entities[i]["name"].lower().replace(" ", "_")
+            ename = _safe_filename(entities[i]["name"])
             if isinstance(res, Exception):
                 errors.append(f"Asset failed for {ename}: {res}")
                 sprite_map[ename] = {"png_b64": None}
@@ -1504,7 +1601,7 @@ The game MUST be immediately playable, visually polished, and FUN when loaded in
 
         script_map: dict[str, str] = {}
         for i, res in enumerate(script_results):
-            ename = entities[i]["name"].lower().replace(" ", "_")
+            ename = _safe_filename(entities[i]["name"])
             if isinstance(res, Exception):
                 errors.append(f"Script failed for {ename}: {res}")
                 script_map[ename] = _fallback_script(entities[i])
@@ -1520,7 +1617,7 @@ The game MUST be immediately playable, visually polished, and FUN when loaded in
 
         scene_map: dict[str, str] = {}
         for i, res in enumerate(scene_results):
-            ename = entities[i]["name"].lower().replace(" ", "_")
+            ename = _safe_filename(entities[i]["name"])
             if isinstance(res, Exception):
                 errors.append(f"Scene failed for {ename}: {res}")
                 scene_map[ename] = f'[gd_scene format=3]\n[node name="{ename}" type="Node2D"]\n'
@@ -1531,8 +1628,8 @@ The game MUST be immediately playable, visually polished, and FUN when loaded in
 
         # ── Phase 5: Assembly ──────────────────────────────────────────────
         game_name = design_doc.get("game_type", "game").title() + " Game"
-        project_config = _generate_project_config(game_name)
-        main_scene = _generate_main_scene(entities)
+        project_config = _generate_project_config(game_name, design_doc.get("game_type", "arcade"))
+        main_scene = _generate_main_scene(entities, design_doc.get("game_type", "arcade"))
         icon_svg = _generate_icon_svg()
         readme = _generate_readme(
             design_doc.get("game_type", "arcade"),

@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Space Shooter</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#000;display:flex;justify-content:center;align-items:center;min-height:100vh;
+font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display','Inter','Segoe UI',sans-serif;
+-webkit-font-smoothing:antialiased;overflow:hidden}
+canvas{display:block}
+</style></head><body>
+<canvas id="g"></canvas>
+<script>
+const C=document.getElementById('g'),X=C.getContext('2d');
+let W=640,H=800;C.width=W;C.height=H;
+const K={};addEventListener('keydown',e=>K[e.code]=true);addEventListener('keyup',e=>K[e.code]=false);
+let state='menu',score=0,lives=3,wave=1,spawnTimer=0;
+let P={x:W/2,y:H-80,w:32,h:32,speed:5,shootTimer:0,shootRate:0.15};
+let bullets=[],enemies=[],particles=[],stars=[];
+for(let i=0;i<100;i++)stars.push({x:Math.random()*W,y:Math.random()*H,s:Math.random()*2+0.5,b:Math.random()});
+function spawnEnemy(){
+  let t=Math.random();
+  if(t<0.6)enemies.push({x:Math.random()*(W-30)+15,y:-30,w:24,h:24,vy:2+wave*0.3,hp:1,type:'small',angle:0});
+  else if(t<0.9)enemies.push({x:Math.random()*(W-40)+20,y:-40,w:36,h:36,vy:1.5+wave*0.2,hp:3,type:'medium',vx:Math.sin(Date.now()*0.001)*2,angle:0});
+  else enemies.push({x:Math.random()*(W-50)+25,y:-50,w:48,h:48,vy:1+wave*0.15,hp:8,type:'boss',vx:0,angle:0});
+}
+function burst(x,y,clr,n=12){for(let i=0;i<n;i++)particles.push({x,y,vx:(Math.random()-0.5)*6,vy:(Math.random()-0.5)*6,life:1,clr,r:Math.random()*3+1})}
+function update(dt){
+  if(state!=='play')return;
+  if(K['ArrowLeft']||K['KeyA'])P.x-=P.speed;if(K['ArrowRight']||K['KeyD'])P.x+=P.speed;
+  if(K['ArrowUp']||K['KeyW'])P.y-=P.speed;if(K['ArrowDown']||K['KeyS'])P.y+=P.speed;
+  P.x=Math.max(16,Math.min(W-16,P.x));P.y=Math.max(16,Math.min(H-16,P.y));
+  P.shootTimer-=dt;if((K['Space']||K['KeyZ'])&&P.shootTimer<=0){
+    bullets.push({x:P.x-6,y:P.y-20,vy:-10,w:3,h:12});bullets.push({x:P.x+6,y:P.y-20,vy:-10,w:3,h:12});
+    P.shootTimer=P.shootRate}
+  bullets.forEach(b=>{b.y+=b.vy});bullets=bullets.filter(b=>b.y>-20);
+  spawnTimer-=dt;if(spawnTimer<=0){spawnEnemy();spawnTimer=Math.max(0.3,1.5-wave*0.1)}
+  enemies.forEach(e=>{e.y+=e.vy;if(e.vx)e.x+=Math.sin(e.y*0.02)*e.vx;e.angle+=dt*2;
+    if(e.y>H+50)e.hp=-1;
+    bullets.forEach(b=>{if(b.vy<0&&Math.abs(b.x-e.x)<e.w/2+4&&Math.abs(b.y-e.y)<e.h/2+8){e.hp--;b.vy=99;
+      burst(b.x,b.y,'#ffd700',5);if(e.hp<=0){score+=e.type==='boss'?100:e.type==='medium'?30:10;
+        burst(e.x,e.y,e.type==='boss'?'#e74c3c':'#ff6b6b',e.type==='boss'?30:15)}}});
+    if(e.hp>0&&Math.abs(P.x-e.x)<(P.w+e.w)/2&&Math.abs(P.y-e.y)<(P.h+e.h)/2){
+      lives--;e.hp=0;burst(P.x,P.y,'#4a90e2',20);if(lives<=0)state='over'}
+  });
+  enemies=enemies.filter(e=>e.hp>0);
+  if(enemies.length===0&&spawnTimer>0.5){wave++;spawnTimer=0.2}
+  particles.forEach(p=>{p.x+=p.vx;p.y+=p.vy;p.life-=dt*2});particles=particles.filter(p=>p.life>0);
+  stars.forEach(s=>{s.y+=s.s;if(s.y>H){s.y=0;s.x=Math.random()*W}s.b=0.3+Math.sin(Date.now()*0.003+s.x)*0.3});
+}
+function drawShip(x,y){
+  X.save();X.translate(x,y);
+  // Engine glow
+  X.fillStyle='rgba(100,150,255,0.3)';X.shadowColor='#4a90e2';X.shadowBlur=15;
+  X.beginPath();X.ellipse(0,18,8,12,0,0,Math.PI*2);X.fill();X.shadowBlur=0;
+  // Body
+  X.fillStyle='#4a90e2';X.beginPath();X.moveTo(0,-20);X.lineTo(-14,16);X.lineTo(0,10);X.lineTo(14,16);X.closePath();X.fill();
+  // Cockpit
+  X.fillStyle='#7ec8e3';X.beginPath();X.ellipse(0,-4,5,8,0,0,Math.PI*2);X.fill();
+  // Wings
+  X.fillStyle='#3a7bd5';X.beginPath();X.moveTo(-10,8);X.lineTo(-22,18);X.lineTo(-8,14);X.closePath();X.fill();
+  X.beginPath();X.moveTo(10,8);X.lineTo(22,18);X.lineTo(8,14);X.closePath();X.fill();
+  X.restore();
+}
+function drawEnemy(e){
+  X.save();X.translate(e.x,e.y);
+  if(e.type==='boss'){X.fillStyle='#e74c3c';X.beginPath();X.moveTo(0,-24);X.lineTo(-24,24);X.lineTo(24,24);X.closePath();X.fill();
+    X.fillStyle='#c0392b';X.beginPath();X.arc(0,4,10,0,Math.PI*2);X.fill();
+    X.fillStyle='#ff0';X.beginPath();X.arc(-6,-2,3,0,Math.PI*2);X.fill();X.beginPath();X.arc(6,-2,3,0,Math.PI*2);X.fill();
+    // Health bar
+    X.fillStyle='#333';X.fillRect(-20,-30,40,4);X.fillStyle='#e74c3c';X.fillRect(-20,-30,40*(e.hp/8),4);
+  }else if(e.type==='medium'){X.fillStyle='#8e44ad';X.beginPath();X.arc(0,0,e.w/2,0,Math.PI*2);X.fill();
+    X.fillStyle='#fff';X.beginPath();X.arc(-6,-4,3,0,Math.PI*2);X.fill();X.beginPath();X.arc(6,-4,3,0,Math.PI*2);X.fill();
+  }else{X.fillStyle='#e67e22';X.rotate(e.angle);X.fillRect(-e.w/2,-e.h/2,e.w,e.h);
+    X.fillStyle='#f39c12';X.fillRect(-e.w/4,-e.h/4,e.w/2,e.h/2)}
+  X.restore();
+}
+function draw(){
+  X.fillStyle='#050510';X.fillRect(0,0,W,H);
+  stars.forEach(s=>{X.fillStyle=`rgba(255,255,255,${s.b})`;X.fillRect(s.x,s.y,s.s,s.s)});
+  bullets.forEach(b=>{X.fillStyle='#7ec8e3';X.shadowColor='#4a90e2';X.shadowBlur=6;X.fillRect(b.x-1,b.y,b.w,b.h);X.shadowBlur=0});
+  enemies.forEach(drawEnemy);
+  if(state==='play')drawShip(P.x,P.y);
+  particles.forEach(p=>{X.globalAlpha=p.life;X.fillStyle=p.clr;X.beginPath();X.arc(p.x,p.y,p.r,0,6.28);X.fill()});
+  X.globalAlpha=1;
+  X.fillStyle='#fff';X.font='bold 16px system-ui';X.fillText(`Score: ${score}`,16,28);X.fillText(`Lives: ${lives}`,16,50);X.fillText(`Wave: ${wave}`,16,72);
+  if(state==='menu'){X.fillStyle='rgba(0,0,0,0.7)';X.fillRect(0,0,W,H);X.textAlign='center';
+    X.font='bold 48px system-ui';X.fillStyle='#4a90e2';X.shadowColor='#4a90e2';X.shadowBlur=20;
+    X.fillText('SPACE SHOOTER',W/2,H/2-80);X.shadowBlur=0;
+    X.font='18px system-ui';X.fillStyle='#aaa';X.fillText('WASD/Arrows to move | SPACE to shoot',W/2,H/2-10);
+    X.fillStyle='#fff';X.fillText('Press SPACE to Start',W/2,H/2+50);X.textAlign='left'}
+  if(state==='over'){X.fillStyle='rgba(0,0,0,0.7)';X.fillRect(0,0,W,H);X.textAlign='center';
+    X.font='bold 48px system-ui';X.fillStyle='#e74c3c';X.fillText('GAME OVER',W/2,H/2-40);
+    X.font='24px system-ui';X.fillStyle='#fff';X.fillText(`Score: ${score} | Wave: ${wave}`,W/2,H/2+10);
+    X.fillText('Press SPACE to Retry',W/2,H/2+60);X.textAlign='left'}
+}
+function gameLoop(t){let dt=Math.min((t-(gameLoop.last||t))/1000,0.05);gameLoop.last=t;
+  if((state==='menu'||state==='over')&&K['Space']){state='play';score=0;lives=3;wave=1;spawnTimer=0;
+    P.x=W/2;P.y=H-80;bullets=[];enemies=[];particles=[];K['Space']=false}
+  update(dt);draw();requestAnimationFrame(gameLoop)}
+requestAnimationFrame(gameLoop);
+</script></body></html>

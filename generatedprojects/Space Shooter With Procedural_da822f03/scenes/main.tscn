@@ -1,0 +1,33 @@
+[gd_scene load_steps=6 format=3 uid="uid://d7399ea1"]
+
+[ext_resource type="PackedScene" path="res://scenes/player_ship.tscn" id="1"]
+[ext_resource type="PackedScene" path="res://scenes/enemy_ship.tscn" id="2"]
+[ext_resource type="PackedScene" path="res://scenes/bullet.tscn" id="3"]
+[ext_resource type="PackedScene" path="res://scenes/power_up.tscn" id="4"]
+[ext_resource type="PackedScene" path="res://scenes/boss.tscn" id="5"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_d7399ea1"]
+size = Vector2(1280, 32)
+
+[node name="Main" type="Node2D"]
+
+[node name="Ground" type="StaticBody2D" parent="."]
+position = Vector2(640, 700)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Ground"]
+shape = SubResource("RectangleShape2D_d7399ea1")
+
+[node name="PlayerShip" parent="." instance=ExtResource("1")]
+position = Vector2(200, 500)
+
+[node name="EnemyShip" parent="." instance=ExtResource("2")]
+position = Vector2(200, 500)
+
+[node name="Bullet" parent="." instance=ExtResource("3")]
+position = Vector2(0, -100)
+
+[node name="PowerUp" parent="." instance=ExtResource("4")]
+position = Vector2(660, 350)
+
+[node name="Boss" parent="." instance=ExtResource("5")]
+position = Vector2(1200, 500)

@@ -8,24 +8,10 @@ from app.services.storage import StorageManager
 router = APIRouter(prefix="/users", tags=["users"])
 
 
-def _to_user_public(user: dict) -> UserPublic:
-    return UserPublic(
-        user_id=user.get("user_id", ""),
-        username=user.get("username", ""),
-        email=user.get("email", ""),
-        full_name=user.get("full_name", ""),
-        phone=user.get("phone", ""),
-        subscription_tier=user.get("subscription_tier", "free"),
-        email_verified=user.get("email_verified", False),
-        plan=user.get("plan", "free"),
-        credits=user.get("credits", 0),
-        created_at=user.get("created_at", ""),
-    )
-
 
 @router.get("/me", response_model=UserPublic)
 async def get_profile(current_user: dict = Depends(get_current_user)) -> UserPublic:
-    return _to_user_public(current_user)
+    return UserPublic.from_db(current_user)
 
 
 @router.patch("/me", response_model=UserPublic)
@@ -41,7 +27,7 @@ async def update_profile(
     updated = await storage.update_user(current_user["user_id"], update_data)
     if not updated:
         raise HTTPException(status_code=404, detail="User not found")
-    return _to_user_public(updated)
+    return UserPublic.from_db(updated)
 
 
 @router.delete("/me", status_code=status.HTTP_204_NO_CONTENT)
@@ -82,7 +68,7 @@ async def deduct_credit(
 ) -> dict:
     success = await storage.deduct_credit(current_user["user_id"])
     if not success:
-        raise HTTPException(status_code=402, detail="No credits remaining")
+        raise HTTPException(status_code=403, detail="No credits remaining")
     return {"message": "Credit deducted successfully"}
 
 
@@ -92,7 +78,7 @@ async def add_credits(
     storage: StorageManager = Depends(get_storage),
     current_user: dict = Depends(get_current_user),
 ) -> dict:
-    if amount <= 0:
-        raise HTTPException(status_code=400, detail="Amount must be positive")
+    if amount <= 0 or amount > 100:
+        raise HTTPException(status_code=400, detail="Amount must be between 1 and 100")
     await storage.add_credits(current_user["user_id"], amount)
     return {"message": f"{amount} credits added successfully"}

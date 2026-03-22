@@ -61,6 +61,43 @@ def _combine_files_to_html(files: dict[str, str]) -> str:
     )
 
 
+@router.get("/public/{project_id}", response_class=HTMLResponse)
+async def public_preview_project(
+    project_id: str,
+    storage: StorageManager = Depends(get_storage),
+) -> HTMLResponse:
+    """Return the generated game HTML without requiring authentication.
+
+    Allows anyone to view/play a project via a public share link.
+    """
+    project = await storage.get_project(project_id)
+    if not project:
+        return HTMLResponse(
+            content=(
+                "<!DOCTYPE html><html><head><meta charset='UTF-8'>"
+                "<title>Not Found</title></head>"
+                "<body style='background:#111;color:#888;font-family:system-ui;"
+                "display:grid;place-items:center;min-height:100vh'>"
+                "<p>Project not found.</p></body></html>"
+            ),
+            status_code=404,
+        )
+
+    generated_code = project.get("generated_code", {})
+    if not generated_code:
+        return HTMLResponse(
+            content=(
+                "<html><body style='background:#111;color:#888;font-family:system-ui;"
+                "display:grid;place-items:center;min-height:100vh'>"
+                "<p>No game generated yet.</p></body></html>"
+            )
+        )
+
+    files = generated_code.get("files", generated_code)
+    html = _combine_files_to_html(files)
+    return HTMLResponse(content=html)
+
+
 @router.get("/{project_id}", response_class=HTMLResponse)
 async def preview_project(
     project_id: str,

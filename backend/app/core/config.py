@@ -1,6 +1,10 @@
+import logging
 import os
+import secrets
 from dataclasses import dataclass
 from pathlib import Path
+
+_config_logger = logging.getLogger(__name__)
 
 
 def _load_env_file() -> None:
@@ -27,7 +31,40 @@ def _get_int(name: str, default: int = 0) -> int:
         return default
 
 
+def _ensure_jwt_secret() -> None:
+    """If JWT_SECRET_KEY is not in the environment, generate one and persist it
+    to the .env file so it survives application restarts in development."""
+    if os.getenv("JWT_SECRET_KEY"):
+        return
+    generated = secrets.token_hex(32)
+    os.environ["JWT_SECRET_KEY"] = generated
+    env_path = Path(__file__).resolve().parents[2] / ".env"
+    try:
+        existing = env_path.read_text(encoding="utf-8") if env_path.exists() else ""
+        if "JWT_SECRET_KEY" not in existing:
+            with env_path.open("a", encoding="utf-8") as f:
+                f.write(f"\nJWT_SECRET_KEY={generated}\n")
+            _config_logger.info(
+                "Generated JWT_SECRET_KEY and saved to %s. "
+                "This key will now persist across restarts.",
+                env_path,
+            )
+        else:
+            _config_logger.warning(
+                "JWT_SECRET_KEY found in .env file but was not loaded into the environment. "
+                "A new key has been generated for this session only."
+            )
+    except OSError as exc:
+        _config_logger.warning(
+            "Could not persist JWT_SECRET_KEY to .env (%s). "
+            "Sessions will be invalidated on next restart. "
+            "Set JWT_SECRET_KEY as an environment variable to fix this.",
+            exc,
+        )
+
+
 _load_env_file()
+_ensure_jwt_secret()
 
 
 @dataclass
@@ -36,7 +73,7 @@ class Settings:
     mongodb_db_name: str = os.getenv("MONGODB_DB_NAME", "game_ai_platform")
     allow_inmemory_fallback: bool = _get_bool("ALLOW_INMEMORY_FALLBACK", True)
 
-    jwt_secret_key: str = os.getenv("JWT_SECRET_KEY", "dev-local-secret")
+    jwt_secret_key: str = os.getenv("JWT_SECRET_KEY", "")
     jwt_algorithm: str = os.getenv("JWT_ALGORITHM", "HS256")
     access_token_expire_minutes: int = _get_int("ACCESS_TOKEN_EXPIRE_MINUTES", 1440)
 
@@ -61,7 +98,15 @@ class Settings:
     aws_region: str = os.getenv("AWS_REGION", "us-east-1")
     s3_bucket_name: str = os.getenv("S3_BUCKET_NAME", "")
 
-    redis_url: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+    redis_url: str = os.getenv("REDIS_URL", "")
+
+    # Comma-separated allowed CORS origins.
+    # Default "*" is fine for local dev. In production set to your frontend domain,
+    # e.g. CORS_ORIGINS=https://app.example.com
+    cors_origins: str = os.getenv("CORS_ORIGINS", "http://localhost:5173")
+
+    # Set to true only when the app itself terminates TLS (not a reverse proxy).
+    enforce_https: bool = _get_bool("ENFORCE_HTTPS", False)
 
     default_credits_free: int = _get_int("DEFAULT_CREDITS_FREE", 10)
     default_credits_pro: int = _get_int("DEFAULT_CREDITS_PRO", 100)

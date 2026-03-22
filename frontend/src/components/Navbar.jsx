@@ -22,6 +22,7 @@ export default function Navbar() {
           {user ? (
             <>
               <Link to="/projects" className="navbar-link">Projects</Link>
+              <Link to="/profile" className="navbar-link">Profile</Link>
               <span className="navbar-user">{user.username}</span>
               <button onClick={handleLogout} className="navbar-btn-ghost">
                 Sign Out

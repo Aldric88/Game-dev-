@@ -36,8 +36,13 @@ def save_project_files(
     folder = _GENERATED_ROOT / f"{safe_name}_{short_id}"
     folder.mkdir(parents=True, exist_ok=True)
 
+    resolved_folder = folder.resolve()
     for filename, content in files.items():
-        fpath = folder / filename
+        fpath = (folder / filename).resolve()
+        # Guard against path traversal (e.g. filename = "../../etc/passwd")
+        if not fpath.is_relative_to(resolved_folder):
+            logger.warning("Skipping unsafe filename %r — resolves outside project folder", filename)
+            continue
         fpath.parent.mkdir(parents=True, exist_ok=True)
         fpath.write_text(content, encoding="utf-8")
         logger.debug("Saved %s", fpath)
@@ -70,13 +75,75 @@ def zip_project(project_name: str, project_id: str) -> bytes | None:
     return buf.read()
 
 
+_PWA_MANIFEST = """{
+  "name": "Game",
+  "short_name": "Game",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#000000",
+  "theme_color": "#000000",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎮</text></svg>",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}"""
+
+_PWA_SW = (
+    "const C='game-v1';"
+    "self.addEventListener('install',e=>e.waitUntil(caches.open(C).then(c=>c.addAll(['/']))));"
+    "self.addEventListener('fetch',e=>e.respondWith(caches.match(e.request).then(r=>r||fetch(e.request))));"
+)
+
+_PWA_HEAD_INJECT = (
+    "<link rel=\"manifest\" href=\"manifest.json\">\n"
+    "<script>if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js');</script>"
+)
+
+
 def zip_project_from_files(project_name: str, files: dict[str, str]) -> bytes:
-    """Create an in-memory ZIP purely from the files dict (no disk needed)."""
+    """Create an in-memory ZIP purely from the files dict (no disk needed).
+
+    Injects PWA manifest and service worker so the exported game can be
+    installed as a Progressive Web App and works offline.
+    """
+    import posixpath
+
     safe_name = _sanitize(project_name) or "untitled"
+
+    # Work on a shallow copy so we don't mutate the caller's dict
+    output_files = dict(files)
+
+    # Inject PWA assets if not already supplied
+    if "manifest.json" not in output_files:
+        output_files["manifest.json"] = _PWA_MANIFEST
+
+    if "sw.js" not in output_files:
+        output_files["sw.js"] = _PWA_SW
+
+    # Patch index.html to register manifest + service worker
+    if "index.html" in output_files:
+        html = output_files["index.html"]
+        if _PWA_HEAD_INJECT not in html:
+            if "</head>" in html:
+                html = html.replace("</head>", f"{_PWA_HEAD_INJECT}\n</head>")
+            elif "</body>" in html:
+                html = html.replace("</body>", f"{_PWA_HEAD_INJECT}\n</body>")
+        output_files["index.html"] = html
+
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        for filename, content in files.items():
-            zf.writestr(f"{safe_name}/{filename}", content)
+        for filename, content in output_files.items():
+            # Normalise the archive entry path to prevent zip-slip attacks.
+            # posixpath.normpath collapses '..' components; we also strip any
+            # leading slashes so the entry is always relative.
+            safe_entry = posixpath.normpath(filename).lstrip("/")
+            if safe_entry.startswith(".."):
+                logger.warning("Skipping unsafe archive entry %r", filename)
+                continue
+            zf.writestr(f"{safe_name}/{safe_entry}", content)
     buf.seek(0)
     return buf.read()
 
@@ -101,14 +168,23 @@ def open_project_folder(project_name: str, project_id: str) -> dict[str, Any]:
         return {"success": False, "error": str(e), "path": path_str}
 
 
+def _rglob_bounded(directory: Path, pattern: str, max_depth: int = 3):
+    """rglob with a maximum directory depth to avoid scanning huge trees."""
+    for item in directory.iterdir():
+        if item.is_file() and item.match(pattern):
+            yield item
+        elif item.is_dir() and max_depth > 1:
+            yield from _rglob_bounded(item, pattern, max_depth - 1)
+
+
 def find_godot_executable() -> str | None:
     """Attempt to locate the Godot 4 executable on the system."""
-    # Check PATH first
+    # Check PATH first — fastest and most reliable
     godot = shutil.which("godot") or shutil.which("godot4") or shutil.which("Godot_v4")
     if godot:
         return godot
 
-    # Common install locations (Windows)
+    # Common install locations (Windows) — depth-limited to avoid scanning all of Program Files
     if platform.system() == "Windows":
         search_dirs = [
             Path(os.environ.get("PROGRAMFILES", "C:\\Program Files")),
@@ -121,9 +197,12 @@ def find_godot_executable() -> str | None:
         for d in search_dirs:
             if not d.is_dir():
                 continue
-            for exe in d.rglob("Godot*.exe"):
-                if "console" not in exe.name.lower():
-                    return str(exe)
+            try:
+                for exe in _rglob_bounded(d, "Godot*.exe", max_depth=3):
+                    if "console" not in exe.name.lower():
+                        return str(exe)
+            except PermissionError:
+                continue
 
     # macOS
     elif platform.system() == "Darwin":

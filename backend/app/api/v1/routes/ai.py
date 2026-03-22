@@ -1,9 +1,12 @@
+import asyncio
+import json
 import logging
 from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import Response, JSONResponse
+from fastapi.responses import Response, JSONResponse, StreamingResponse
+from pydantic import BaseModel
 
 from app.api.deps import get_current_user, get_storage
 from app.schemas.ai import (
@@ -27,13 +30,28 @@ from app.services.storage import StorageManager
 router = APIRouter(prefix="/ai", tags=["ai"])
 logger = logging.getLogger(__name__)
 
+_MAX_VERSIONS = 20
+_MAX_CONVERSATION = 100  # individual message entries (= 50 user+assistant pairs)
 
-def _append_messages(project: dict, user_content: str, assistant_content: str) -> list:
-    history = project.get("ai_conversation", [])
-    now = datetime.now(timezone.utc).isoformat()
-    history.append({"role": "user", "content": user_content, "timestamp": now})
-    history.append({"role": "assistant", "content": assistant_content, "timestamp": now})
-    return history
+
+def _append_messages(
+    project: dict,
+    user_content: str,
+    assistant_content: str,
+    user_sent_at: str | None = None,
+) -> list:
+    """Append a user+assistant message pair with distinct timestamps.
+
+    ``user_sent_at`` should be the ISO timestamp recorded *before* the AI call
+    so the user message reflects when the request was made, not when it returned.
+    """
+    history = list(project.get("ai_conversation", []))
+    user_ts = user_sent_at or datetime.now(timezone.utc).isoformat()
+    assistant_ts = datetime.now(timezone.utc).isoformat()
+    history.append({"role": "user", "content": user_content, "timestamp": user_ts})
+    history.append({"role": "assistant", "content": assistant_content, "timestamp": assistant_ts})
+    # Keep only the most recent entries (50 pairs) to prevent unbounded growth.
+    return history[-_MAX_CONVERSATION:]
 
 
 def _append_usage_log(project: dict, operation: str, usage: Any) -> list:
@@ -53,6 +71,13 @@ async def _require_project(project_id: str, storage: StorageManager) -> dict:
     return project
 
 
+async def _require_owned_project(project_id: str, storage: StorageManager, current_user: dict) -> dict:
+    project = await _require_project(project_id, storage)
+    if project.get("user_id") != current_user["user_id"]:
+        raise HTTPException(status_code=403, detail="Access denied")
+    return project
+
+
 def _get_realtime(request: Request) -> RealtimeManager | None:
     return getattr(request.app.state, "realtime", None)
 
@@ -66,6 +91,16 @@ async def _enforce_rate_limit(user_id: str) -> None:
         )
 
 
+async def _enforce_credits(user_id: str, storage: StorageManager) -> None:
+    """Deduct one credit atomically. Raises 402 if the user has none left."""
+    success = await storage.deduct_credit(user_id)
+    if not success:
+        raise HTTPException(
+            status_code=402,
+            detail="No credits remaining. Please wait for your monthly reset or upgrade your plan.",
+        )
+
+
 @router.post("/design", response_model=AIDesignResponse)
 async def generate_design(
     request: AIDesignRequest,
@@ -74,15 +109,17 @@ async def generate_design(
     current_user: dict = Depends(get_current_user),
 ) -> AIDesignResponse:
     await _enforce_rate_limit(current_user["user_id"])
-    project = await _require_project(request.project_id, storage)
+    await _enforce_credits(current_user["user_id"], storage)
+    project = await _require_owned_project(request.project_id, storage, current_user)
     realtime = _get_realtime(req)
 
+    user_sent_at = datetime.now(timezone.utc).isoformat()
     result = await ai_orchestrator.generate_design(
         request.prompt,
         history=project.get("ai_conversation", []),
     )
 
-    history = _append_messages(project, request.prompt, result.summary)
+    history = _append_messages(project, request.prompt, result.summary, user_sent_at)
     usage_logs = _append_usage_log(project, "design", result.usage)
     update = {
         "design_doc": result.payload,
@@ -113,9 +150,11 @@ async def generate_code(
     current_user: dict = Depends(get_current_user),
 ) -> AICodeResponse:
     await _enforce_rate_limit(current_user["user_id"])
-    project = await _require_project(request.project_id, storage)
+    await _enforce_credits(current_user["user_id"], storage)
+    project = await _require_owned_project(request.project_id, storage, current_user)
     realtime = _get_realtime(req)
 
+    user_sent_at = datetime.now(timezone.utc).isoformat()
     result = await ai_orchestrator.generate_code(
         request.prompt,
         design_doc=project.get("design_doc"),
@@ -125,13 +164,12 @@ async def generate_code(
     )
 
     files = result.payload.get("files", {})
-    framework = request.framework.lower() if request.framework else "phaser"
 
-    # Save files locally to /generatedprojects
+    # Save files locally to /generatedprojects (run in thread — disk I/O is blocking)
     if files:
         project_name = project.get("name", "untitled")
         try:
-            saved_dir = save_project_files(project_name, request.project_id, files)
+            saved_dir = await asyncio.to_thread(save_project_files, project_name, request.project_id, files)
             logger.info("Local save: %s", saved_dir)
         except Exception as e:
             logger.warning("Local save failed: %s", e)
@@ -152,8 +190,9 @@ async def generate_code(
         "files": list(files.keys()),
         "agents": ["design", "script", "scene", "asset", "assembler"],
     })
+    versions = versions[-_MAX_VERSIONS:]
 
-    history = _append_messages(project, request.prompt, result.summary)
+    history = _append_messages(project, request.prompt, result.summary, user_sent_at)
     usage_logs = _append_usage_log(project, "generate", result.usage)
 
     # Store design doc from pipeline if available
@@ -193,8 +232,10 @@ async def chat(
     current_user: dict = Depends(get_current_user),
 ) -> AIChatResponse:
     await _enforce_rate_limit(current_user["user_id"])
-    project = await _require_project(request.project_id, storage)
+    await _enforce_credits(current_user["user_id"], storage)
+    project = await _require_owned_project(request.project_id, storage, current_user)
 
+    user_sent_at = datetime.now(timezone.utc).isoformat()
     result = await ai_orchestrator.chat_reply(
         request.message,
         project=project,
@@ -202,7 +243,7 @@ async def chat(
     )
     reply = result.payload.get("reply", "")
 
-    history = _append_messages(project, request.message, reply)
+    history = _append_messages(project, request.message, reply, user_sent_at)
     usage_logs = _append_usage_log(project, "chat", result.usage)
     update = {"ai_conversation": history, "ai_usage_logs": usage_logs}
     updated = await storage.update_project(request.project_id, update)
@@ -222,7 +263,8 @@ async def generate_godot_game(
     current_user: dict = Depends(get_current_user),
 ) -> GodotGenerateResponse:
     await _enforce_rate_limit(current_user["user_id"])
-    project = await _require_project(request.project_id, storage)
+    await _enforce_credits(current_user["user_id"], storage)
+    project = await _require_owned_project(request.project_id, storage, current_user)
     realtime = _get_realtime(req)
 
     username = current_user.get("username", "unknown")
@@ -251,6 +293,169 @@ async def generate_godot_game(
     )
 
 
+class FileActionRequest(BaseModel):
+    project_id: str
+    filename: str
+    content: str
+    action: str  # "explain" | "fix" | "improve"
+
+
+@router.post("/file-action")
+async def file_action(
+    request: FileActionRequest,
+    storage: StorageManager = Depends(get_storage),
+    current_user: dict = Depends(get_current_user),
+) -> JSONResponse:
+    await _enforce_rate_limit(current_user["user_id"])
+    await _enforce_credits(current_user["user_id"], storage)
+    project = await _require_owned_project(request.project_id, storage, current_user)
+
+    if request.action == "explain":
+        prompt = f"Explain what this file does:\n\nFilename: {request.filename}\n\n```\n{request.content}\n```"
+    elif request.action == "fix":
+        prompt = f"Find and fix bugs in this file. Return the corrected code only:\n\nFilename: {request.filename}\n\n```\n{request.content}\n```"
+    elif request.action == "improve":
+        prompt = f"Suggest improvements for this file:\n\nFilename: {request.filename}\n\n```\n{request.content}\n```"
+    else:
+        raise HTTPException(status_code=400, detail=f"Unknown action '{request.action}'. Must be 'explain', 'fix', or 'improve'.")
+
+    result = await ai_orchestrator.chat_reply(prompt, project=project, history=[])
+    reply_text = result.payload.get("reply", "")
+
+    history = _append_messages(project, prompt, reply_text)
+    usage_logs = _append_usage_log(project, f"file-action:{request.action}", result.usage)
+    update = {"ai_conversation": history, "ai_usage_logs": usage_logs}
+    await storage.update_project(request.project_id, update)
+
+    return JSONResponse(content={"reply": reply_text})
+
+
+@router.post("/generate/stream")
+async def generate_code_stream(
+    request: AICodeRequest,
+    req: Request,
+    storage: StorageManager = Depends(get_storage),
+    current_user: dict = Depends(get_current_user),
+) -> StreamingResponse:
+    """Stream AI code generation progress as Server-Sent Events."""
+    await _enforce_rate_limit(current_user["user_id"])
+    await _enforce_credits(current_user["user_id"], storage)
+    project = await _require_owned_project(request.project_id, storage, current_user)
+
+    queue: asyncio.Queue = asyncio.Queue()
+    agents = ["design", "scripts", "scenes", "assets", "assembler"]
+
+    async def run_generation():
+        try:
+            # Simulate agent progress before blocking generation call
+            for agent in agents:
+                await queue.put({"type": "agent", "agent": agent, "status": "running"})
+                await asyncio.sleep(0.5)
+            result = await ai_orchestrator.generate_code(
+                request.prompt,
+                design_doc=project.get("design_doc"),
+                history=project.get("ai_conversation", []),
+                realtime=None,
+                project_id=request.project_id,
+            )
+            # Save to DB (same logic as /generate)
+            files = result.payload.get("files", {})
+            versions = project.get("versions", [])
+            versions.append({
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "source": "ai-stream",
+                "files": list(files.keys()),
+            })
+            history = _append_messages(project, request.prompt, result.summary)
+            usage_logs = _append_usage_log(project, "generate-stream", result.usage)
+            update = {
+                "generated_code": result.payload,
+                "ai_conversation": history,
+                "ai_usage_logs": usage_logs,
+                "versions": versions[-_MAX_VERSIONS:],
+                "status": "building",
+            }
+            updated = await storage.update_project(request.project_id, update)
+            await storage.update_user_usage(
+                current_user["user_id"], ai_tokens=int(result.usage.total_tokens or 0)
+            )
+            for agent in agents:
+                await queue.put({"type": "agent", "agent": agent, "status": "complete"})
+            proj_dict = ProjectResponse(**(updated or project)).model_dump()
+            # Convert datetime objects to strings
+            proj_dict = {
+                k: str(v) if hasattr(v, "isoformat") else v
+                for k, v in proj_dict.items()
+            }
+            await queue.put({"type": "done", "project": proj_dict})
+        except Exception as e:
+            await queue.put({"type": "error", "message": str(e)})
+        finally:
+            await queue.put(None)  # sentinel
+
+    async def event_stream():
+        task = asyncio.create_task(run_generation())
+        while True:
+            item = await queue.get()
+            if item is None:
+                break
+            yield f"data: {json.dumps(item, default=str)}\n\n"
+        await task
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"},
+    )
+
+
+@router.post("/chat/stream")
+async def chat_stream(
+    request: AIChatRequest,
+    req: Request,
+    storage: StorageManager = Depends(get_storage),
+    current_user: dict = Depends(get_current_user),
+) -> StreamingResponse:
+    """Stream chat reply as Server-Sent Events, splitting reply into word-level chunks."""
+    await _enforce_rate_limit(current_user["user_id"])
+    await _enforce_credits(current_user["user_id"], storage)
+    project = await _require_owned_project(request.project_id, storage, current_user)
+
+    user_sent_at = datetime.now(timezone.utc).isoformat()
+    result = await ai_orchestrator.chat_reply(
+        request.message,
+        project=project,
+        history=project.get("ai_conversation", []),
+    )
+    reply = result.payload.get("reply", "")
+
+    history = _append_messages(project, request.message, reply, user_sent_at)
+    usage_logs = _append_usage_log(project, "chat-stream", result.usage)
+    update = {"ai_conversation": history, "ai_usage_logs": usage_logs}
+    updated = await storage.update_project(request.project_id, update)
+
+    proj_dict = ProjectResponse(**(updated or project)).model_dump()
+    proj_dict = {
+        k: str(v) if hasattr(v, "isoformat") else v
+        for k, v in proj_dict.items()
+    }
+
+    async def event_stream():
+        # Simulate streaming by yielding word-by-word chunks
+        words = reply.split(" ")
+        for i, word in enumerate(words):
+            chunk = word if i == 0 else " " + word
+            yield f"data: {json.dumps({'type': 'chunk', 'content': chunk})}\n\n"
+            await asyncio.sleep(0.02)
+        yield f"data: {json.dumps({'type': 'done', 'project': proj_dict}, default=str)}\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"},
+    )
+
+
 @router.get("/download/{project_id}")
 async def download_project_zip(
     project_id: str,
@@ -258,14 +463,14 @@ async def download_project_zip(
     current_user: dict = Depends(get_current_user),
 ) -> Response:
     """Download all generated project files as a ZIP archive."""
-    project = await _require_project(project_id, storage)
+    project = await _require_owned_project(project_id, storage, current_user)
     generated_code = project.get("generated_code", {})
     files = generated_code.get("files", {})
     if not files:
         raise HTTPException(status_code=404, detail="No generated files to download")
 
     project_name = project.get("name", "untitled")
-    zip_bytes = zip_project_from_files(project_name, files)
+    zip_bytes = await asyncio.to_thread(zip_project_from_files, project_name, files)
 
     safe_name = "".join(c if (c.isalnum() or c in " _-") else "_" for c in project_name).strip() or "project"
     return Response(
@@ -274,6 +479,95 @@ async def download_project_zip(
         headers={"Content-Disposition": f'attachment; filename="{safe_name}.zip"'},
     )
 
+_MAX_IMPORT_FILES = 200
+_MAX_FILE_SIZE_BYTES = 512 * 1024  # 512 KB per file
+
+
+def _validate_files(files: dict[str, str], operation: str = "import") -> None:
+    """Enforce per-operation file count and size limits."""
+    if len(files) > _MAX_IMPORT_FILES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{operation}: too many files ({len(files)}). Maximum is {_MAX_IMPORT_FILES}.",
+        )
+    for name, content in files.items():
+        size = len(content.encode("utf-8"))
+        if size > _MAX_FILE_SIZE_BYTES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"{operation}: file '{name}' is {size} bytes, max is {_MAX_FILE_SIZE_BYTES} bytes.",
+            )
+
+
+class _ImportFilesBody(BaseModel):
+    files: dict[str, str]
+    merge: bool = True  # True = merge with existing files; False = replace all
+
+
+@router.post("/import/{project_id}", response_model=ProjectResponse)
+async def import_files(
+    project_id: str,
+    body: _ImportFilesBody,
+    storage: StorageManager = Depends(get_storage),
+    current_user: dict = Depends(get_current_user),
+) -> ProjectResponse:
+    """Import user-supplied source files into a project so the AI can modify them."""
+    _validate_files(body.files, "import")
+    project = await _require_owned_project(project_id, storage, current_user)
+
+    existing_gc = project.get("generated_code") or {}
+    if body.merge:
+        merged = {**existing_gc.get("files", {}), **body.files}
+    else:
+        merged = body.files
+
+    versions = project.get("versions", [])
+    versions.append({
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "source": "user-import",
+        "files": list(body.files.keys()),
+    })
+    versions = versions[-_MAX_VERSIONS:]
+
+    update = {
+        "generated_code": {**existing_gc, "files": merged},
+        "status": "ready",
+        "versions": versions,
+    }
+    updated = await storage.update_project(project_id, update)
+    return ProjectResponse(**(updated or project))
+
+
+class _SaveCodeBody(BaseModel):
+    files: dict[str, str]
+
+
+@router.patch("/code/{project_id}", response_model=ProjectResponse)
+async def save_code(
+    project_id: str,
+    body: _SaveCodeBody,
+    storage: StorageManager = Depends(get_storage),
+    current_user: dict = Depends(get_current_user),
+) -> ProjectResponse:
+    """Save manually edited source files back to the project."""
+    _validate_files(body.files, "save-code")
+    project = await _require_owned_project(project_id, storage, current_user)
+    existing_gc = project.get("generated_code") or {}
+    versions = project.get("versions", [])
+    versions.append({
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "source": "manual-edit",
+        "files": list(body.files.keys()),
+    })
+    versions = versions[-_MAX_VERSIONS:]
+    update = {
+        "generated_code": {**existing_gc, "files": body.files},
+        "versions": versions,
+    }
+    updated = await storage.update_project(project_id, update)
+    return ProjectResponse(**(updated or project))
+
+
 @router.post("/open-folder/{project_id}")
 async def open_folder(
     project_id: str,
@@ -281,9 +575,9 @@ async def open_folder(
     current_user: dict = Depends(get_current_user),
 ) -> JSONResponse:
     """Open the generated project folder in the system file explorer."""
-    project = await _require_project(project_id, storage)
+    project = await _require_owned_project(project_id, storage, current_user)
     project_name = project.get("name", "untitled")
-    result = open_project_folder(project_name, project_id)
+    result = await asyncio.to_thread(open_project_folder, project_name, project_id)
     status = 200 if result["success"] else 404
     return JSONResponse(content=result, status_code=status)
 
@@ -295,8 +589,8 @@ async def run_godot(
     current_user: dict = Depends(get_current_user),
 ) -> JSONResponse:
     """Launch Godot editor with the generated project."""
-    project = await _require_project(project_id, storage)
+    project = await _require_owned_project(project_id, storage, current_user)
     project_name = project.get("name", "untitled")
-    result = launch_godot(project_name, project_id)
+    result = await asyncio.to_thread(launch_godot, project_name, project_id)
     status = 200 if result["success"] else 404
     return JSONResponse(content=result, status_code=status)

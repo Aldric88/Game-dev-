@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
@@ -10,6 +11,8 @@ from bson import ObjectId
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
 
 from app.core.config import settings
+
+_storage_logger = logging.getLogger(__name__)
 
 
 class StorageManager:
@@ -23,16 +26,41 @@ class StorageManager:
 
     async def connect(self) -> None:
         try:
-            client = AsyncIOMotorClient(settings.mongodb_uri, serverSelectionTimeoutMS=3000)
+            kwargs: dict = {"serverSelectionTimeoutMS": 10000}
+            # On macOS the system Python doesn't use the OS certificate store.
+            # Pass certifi's CA bundle so TLS works for Atlas (mongodb+srv://).
+            if settings.mongodb_uri.startswith("mongodb+srv://") or "tls=true" in settings.mongodb_uri.lower():
+                try:
+                    import certifi
+                    kwargs["tlsCAFile"] = certifi.where()
+                except ImportError:
+                    pass
+            client = AsyncIOMotorClient(settings.mongodb_uri, **kwargs)
             await client.admin.command("ping")
             self._mongo_client = client
             self._mongo_db = client[settings.mongodb_db_name]
             self.mode = "mongo"
+            await self._ensure_indexes()
         except Exception:
             if settings.allow_inmemory_fallback:
                 self.mode = "memory"
             else:
                 raise
+
+    async def _ensure_indexes(self) -> None:
+        """Create indexes required for efficient queries. Safe to call repeatedly."""
+        try:
+            await self._mongo_users.create_index("email", unique=True, background=True)
+            await self._mongo_users.create_index("username", unique=True, background=True)
+            await self._mongo_users.create_index("user_id", unique=True, background=True)
+            await self._mongo_projects.create_index("project_id", unique=True, background=True)
+            await self._mongo_projects.create_index("user_id", background=True)
+            await self._mongo_projects.create_index(
+                [("user_id", 1), ("updated_at", -1)], background=True
+            )
+            _storage_logger.info("MongoDB indexes ensured.")
+        except Exception as exc:
+            _storage_logger.warning("Could not create MongoDB indexes: %s", exc)
 
     async def close(self) -> None:
         if self._mongo_client:
@@ -137,7 +165,9 @@ class StorageManager:
             if user is None:
                 return None
             user.update(update)
-        return user
+            # Return a shallow copy *inside* the lock so the caller receives a
+            # snapshot that a concurrent writer cannot mutate underneath it.
+            return dict(user)
 
     async def delete_user(self, user_id: str) -> bool:
         if self.mode == "mongo":
@@ -236,7 +266,8 @@ class StorageManager:
             if project is None:
                 return None
             project.update(update)
-        return project
+            # Return a shallow copy inside the lock — same reasoning as update_user.
+            return dict(project)
 
     async def delete_project(self, project_id: str) -> bool:
         if self.mode == "mongo":

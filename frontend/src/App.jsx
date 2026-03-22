@@ -7,6 +7,8 @@ import Login from './pages/Login';
 import Register from './pages/Register';
 import Projects from './pages/Projects';
 import ProjectDetail from './pages/ProjectDetail';
+import Profile from './pages/Profile';
+import PlayPage from './pages/PlayPage';
 
 function PrivateRoute({ children }) {
   const { user, loading } = useAuth();
@@ -68,6 +70,8 @@ export default function App() {
             <Route path="/register" element={<GuestRoute><Register /></GuestRoute>} />
             <Route path="/projects" element={<PrivateRoute><Projects /></PrivateRoute>} />
             <Route path="/projects/:id" element={<PrivateRoute><ProjectDetail /></PrivateRoute>} />
+            <Route path="/profile" element={<PrivateRoute><Profile /></PrivateRoute>} />
+            <Route path="/play/:id" element={<PlayPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </div>

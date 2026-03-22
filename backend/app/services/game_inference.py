@@ -92,7 +92,7 @@ def _infer_game_type(prompt: str) -> str:
 
 def _infer_entities(prompt: str) -> list[str]:
     lower = prompt.lower()
-    game_type = infer_game_type(prompt)
+    game_type = _infer_game_type(prompt)
 
     # Game-type-specific entity sets for richer generation
     type_entities: dict[str, list[str]] = {
@@ -144,8 +144,8 @@ def _extract_json_object(text: str) -> dict[str, Any]:
 
 
 def _fallback_design(prompt: str) -> dict[str, Any]:
-    game_type = infer_game_type(prompt)
-    entities = infer_entities(prompt)
+    game_type = _infer_game_type(prompt)
+    entities = _infer_entities(prompt)
 
     # Game-type-specific mechanics instead of always platformer
     type_mechanics: dict[str, list[str]] = {
@@ -193,7 +193,7 @@ def _fallback_design(prompt: str) -> dict[str, Any]:
 
 
 def _fallback_code(prompt: str) -> dict[str, Any]:
-    game_type = infer_game_type(prompt)
+    game_type = _infer_game_type(prompt)
     html = get_html_fallback_game(game_type)
     return {
         "summary": "Generated starter HTML game using deterministic fallback.",

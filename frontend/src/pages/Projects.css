@@ -343,26 +343,56 @@
   color: var(--text-tertiary);
 }
 
-.project-delete {
+/* Search */
+.projects-search {
+  margin-left: auto;
+  padding: 5px 10px;
+  font-size: 12px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 8px;
+  color: #ccc;
+  outline: none;
+  width: 160px;
+  transition: border-color 0.15s;
+}
+.projects-search::placeholder { color: rgba(255,255,255,0.2); }
+.projects-search:focus { border-color: rgba(255,255,255,0.18); }
+
+/* Card actions (duplicate + delete) */
+.project-card-actions {
   position: absolute;
-  top: 16px;
-  right: 16px;
-  width: 24px;
-  height: 24px;
+  top: 12px;
+  right: 12px;
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+.project-card:hover .project-card-actions { opacity: 1; }
+
+.project-action-btn {
   display: flex;
   align-items: center;
   justify-content: center;
+  width: 26px;
+  height: 26px;
   background: transparent;
   border: none;
   color: var(--text-tertiary);
   border-radius: 6px;
   cursor: pointer;
-  opacity: 0;
   transition: all 0.15s ease;
 }
-
-.project-card:hover .project-delete { opacity: 1; }
-.project-delete:hover { color: var(--accent-red); background: rgba(255, 69, 58, 0.08); }
+.project-action-btn:hover { color: var(--text-secondary); background: rgba(255,255,255,0.06); }
+.project-delete:hover { color: var(--accent-red) !important; background: rgba(255, 69, 58, 0.08) !important; }
+.project-action-spinner {
+  width: 10px; height: 10px;
+  border: 1.5px solid rgba(255,255,255,0.15);
+  border-top-color: #ccc;
+  border-radius: 50%;
+  animation: p-spin 0.6s linear infinite;
+}
 
 /* Ghost "New Project" card */
 .project-ghost {
@@ -501,6 +531,87 @@
 .sidebar-shortcut span {
   font-size: 12px;
   color: var(--text-tertiary);
+}
+
+/* ══════════════════════════════════════
+   Templates section
+   ══════════════════════════════════════ */
+.templates-section {
+  display: flex;
+  justify-content: center;
+  padding: 0 24px 28px;
+}
+
+.templates-inner {
+  width: 100%;
+  max-width: 640px;
+}
+
+.templates-heading {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 10px;
+}
+
+.templates-row {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  scrollbar-width: none;
+}
+
+.templates-row::-webkit-scrollbar {
+  display: none;
+}
+
+.template-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  flex-shrink: 0;
+  width: 130px;
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 12px;
+  cursor: pointer;
+  text-align: left;
+  font-family: var(--font-text);
+  transition: all 0.15s ease;
+}
+
+.template-card:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.14);
+}
+
+.template-card:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.template-emoji {
+  font-size: 22px;
+  line-height: 1;
+  margin-bottom: 4px;
+}
+
+.template-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  letter-spacing: -0.01em;
+}
+
+.template-desc {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  line-height: 1.4;
 }
 
 /* ── Responsive ── */

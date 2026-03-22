@@ -80,6 +80,21 @@ async function request(path, options = {}, _isRetry = false) {
     throw new Error(data.detail || 'Authentication required');
   }
 
+  if (res.status === 429) {
+    const retryAfter = data.detail?.match?.(/(\d+)\s*second/)?.[1];
+    const msg = retryAfter
+      ? `Rate limit hit. Try again in ${retryAfter}s.`
+      : (data.detail || 'Too many requests. Please slow down.');
+    const err = new Error(msg);
+    err.status = 429;
+    err.retryAfter = retryAfter ? parseInt(retryAfter, 10) : 30;
+    throw err;
+  }
+  if (res.status === 402) {
+    const err = new Error(data.detail || 'No credits remaining.');
+    err.status = 402;
+    throw err;
+  }
   if (!res.ok) throw new Error(data.detail || `Request failed (${res.status})`);
   return data;
 }
@@ -108,6 +123,8 @@ export const projects = {
     request(`/api/v1/projects/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
   delete: (id) =>
     request(`/api/v1/projects/${id}`, { method: 'DELETE' }),
+  duplicate: (id) =>
+    request(`/api/v1/projects/${id}/duplicate`, { method: 'POST' }),
 };
 
 /* ── AI ── */
@@ -124,7 +141,44 @@ export const ai = {
     request(`/api/v1/ai/import/${projectId}`, { method: 'POST', body: JSON.stringify(body) }),
   saveCode: (projectId, files) =>
     request(`/api/v1/ai/code/${projectId}`, { method: 'PATCH', body: JSON.stringify({ files }) }),
+  fileAction: (body) =>
+    request('/api/v1/ai/file-action', { method: 'POST', body: JSON.stringify(body) }),
 };
+
+/* ── Streaming AI generate (SSE via fetch) ── */
+export async function streamGenerate(body, { onAgent, onDone, onError } = {}) {
+  const token = localStorage.getItem('token');
+  const BASE = import.meta.env.VITE_API_BASE_URL || '';
+  const res = await fetch(`${BASE}/api/v1/ai/generate/stream`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Stream failed (${res.status})`);
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = '';
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    const parts = buf.split('\n\n');
+    buf = parts.pop();
+    for (const part of parts) {
+      const line = part.replace(/^data:\s*/, '').trim();
+      if (!line) continue;
+      try {
+        const evt = JSON.parse(line);
+        if (evt.type === 'agent') onAgent?.(evt);
+        else if (evt.type === 'done') onDone?.(evt.project);
+        else if (evt.type === 'error') onError?.(new Error(evt.message));
+      } catch {}
+    }
+  }
+}
 
 /* ── Download ── */
 export async function downloadProjectZip(projectId) {
@@ -168,4 +222,8 @@ export const health = {
 export function getPreviewUrl(projectId) {
   const token = localStorage.getItem('token');
   return `${BASE}/api/v1/preview/${projectId}?token=${token}`;
+}
+
+export function getPublicPlayUrl(projectId) {
+  return `${BASE}/api/v1/preview/public/${projectId}`;
 }

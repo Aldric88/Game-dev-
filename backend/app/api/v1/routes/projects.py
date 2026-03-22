@@ -68,6 +68,39 @@ async def get_project(
     return ProjectResponse(**project)
 
 
+@router.post("/{project_id}/duplicate", status_code=status.HTTP_201_CREATED, response_model=ProjectResponse)
+async def duplicate_project(
+    project_id: str,
+    storage: StorageManager = Depends(get_storage),
+    current_user: dict = Depends(get_current_user),
+) -> ProjectResponse:
+    source = await storage.get_project(project_id)
+    if not source:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if source.get("user_id") != current_user["user_id"]:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    now = datetime.now(timezone.utc).isoformat()
+    payload = {
+        "user_id": current_user["user_id"],
+        "name": f"{source.get('name', 'Untitled')} (copy)",
+        "description": source.get("description", ""),
+        "framework": source.get("framework", ""),
+        "status": "draft",
+        "deployment": source.get("deployment", {"status": "not_deployed"}),
+        "design_doc": source.get("design_doc", {}),
+        "generated_code": source.get("generated_code", {}),
+        "assets": source.get("assets", []),
+        "ai_conversation": [],
+        "ai_usage_logs": [],
+        "versions": [],
+        "created_at": now,
+        "updated_at": now,
+    }
+    project = await storage.create_project(payload)
+    return ProjectResponse(**project)
+
+
 @router.patch("/{project_id}", response_model=ProjectResponse)
 async def update_project(
     project_id: str,

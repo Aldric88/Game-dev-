@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { projects as api, ai as aiApi } from '../api';
 import Card from '../components/Card';
 import Badge from '../components/Badge';
+import Modal from '../components/Modal';
 import './Projects.css';
 
 const STATUS_BADGE = {
@@ -28,6 +29,9 @@ export default function Projects() {
   const navigate = useNavigate();
   const [list, setList] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState('');
+  const [confirmDelete, setConfirmDelete] = useState(null); // project_id
+  const [duplicating, setDuplicating] = useState(null); // project_id
 
   /* Prompt state */
   const [prompt, setPrompt] = useState('');
@@ -44,6 +48,15 @@ export default function Projects() {
     'Top-down racing game with drifting mechanics',
     'Physics-based puzzle game with gravity switching',
     'Space shooter with procedural enemy waves',
+  ];
+
+  const TEMPLATES = [
+    { id: 'flappy', name: 'Flappy Bird', desc: 'Classic tap-to-fly obstacle game', emoji: '🐦', prompt: 'Create a flappy bird clone with a bird that flies through pipes. Tap to flap. Score increases each pipe passed. Game over on collision.' },
+    { id: 'platformer', name: 'Platformer', desc: 'Side-scrolling jump adventure', emoji: '🏃', prompt: 'Create a side-scrolling platformer with a character that can run and jump. Include platforms, coins to collect, and enemies to avoid.' },
+    { id: 'snake', name: 'Snake', desc: 'Classic grid movement game', emoji: '🐍', prompt: 'Create a classic snake game on a grid. The snake grows when eating food. Game over if it hits walls or itself. Track high score.' },
+    { id: 'shooter', name: 'Space Shooter', desc: 'Top-down bullet hell', emoji: '🚀', prompt: 'Create a top-down space shooter. Player ship moves and shoots bullets. Waves of alien enemies descend. Collect power-ups. Boss every 3 waves.' },
+    { id: 'racing', name: 'Racing', desc: 'Top-down car racing game', emoji: '🏎️', prompt: 'Create a top-down racing game. Player controls a car around a track. Compete against AI opponents. Collect boost power-ups. 3 laps to win.' },
+    { id: 'puzzle', name: 'Puzzle', desc: 'Block matching puzzle', emoji: '🧩', prompt: 'Create a block puzzle game like Tetris. Blocks fall from the top. Player rotates and positions them. Clear complete rows to score points. Speed increases over time.' },
   ];
 
   const load = useCallback(() => {
@@ -142,18 +155,58 @@ export default function Projects() {
     }
   };
 
-  const handleDelete = async (id, e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (!confirm('Delete this project?')) return;
+  const handleDeleteConfirm = async () => {
+    const id = confirmDelete;
+    setConfirmDelete(null);
     try {
       await api.delete(id);
       setList((prev) => prev.filter((p) => p.project_id !== id));
     } catch {}
   };
 
+  const handleDelete = (id, e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setConfirmDelete(id);
+  };
+
+  const handleDuplicate = async (id, e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDuplicating(id);
+    try {
+      const copy = await api.duplicate(id);
+      setList((prev) => [copy, ...prev]);
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      setDuplicating(null);
+    }
+  };
+
+  const filteredList = search.trim()
+    ? list.filter(p =>
+        p.name.toLowerCase().includes(search.toLowerCase()) ||
+        (p.description || '').toLowerCase().includes(search.toLowerCase())
+      )
+    : list;
+
   return (
     <div className="projects-page">
+      {/* Delete confirm modal */}
+      <Modal open={!!confirmDelete} onClose={() => setConfirmDelete(null)} title="Delete project">
+        <p style={{ fontSize: 13, color: '#888', marginBottom: 20 }}>
+          This will permanently delete the project and all its files. This cannot be undone.
+        </p>
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+          <button onClick={() => setConfirmDelete(null)} style={{ padding: '6px 14px', fontSize: 12, background: '#111', color: '#888', border: '1px solid #222', borderRadius: 6, cursor: 'pointer' }}>
+            Cancel
+          </button>
+          <button onClick={handleDeleteConfirm} style={{ padding: '6px 14px', fontSize: 12, background: '#1a0000', color: '#f87171', border: '1px solid #3a0000', borderRadius: 6, cursor: 'pointer', fontWeight: 600 }}>
+            Delete
+          </button>
+        </div>
+      </Modal>
       {/* ── Centered Prompt Area ── */}
       <div className="prompt-hero">
         <div className="prompt-container">
@@ -256,6 +309,31 @@ export default function Projects() {
         </div>
       </div>
 
+      {/* ── Templates section ── */}
+      <div className="templates-section">
+        <div className="templates-inner">
+          <p className="templates-heading">Start from a template</p>
+          <div className="templates-row">
+            {TEMPLATES.map((t) => (
+              <button
+                key={t.id}
+                className="template-card"
+                disabled={sending}
+                onClick={() => {
+                  setPrompt(t.prompt);
+                  inputRef.current?.focus();
+                  window.scrollTo({ top: 0, behavior: 'smooth' });
+                }}
+              >
+                <span className="template-emoji">{t.emoji}</span>
+                <span className="template-name">{t.name}</span>
+                <span className="template-desc">{t.desc}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
       {/* ── Main content: projects + sidebar ── */}
       <div className="container-wide">
         <div className="projects-layout">
@@ -264,9 +342,15 @@ export default function Projects() {
             <div className="projects-section-header">
               <h2 className="projects-section-title">Your Projects</h2>
               <span className="projects-count">{list.length}</span>
+              <input
+                className="projects-search"
+                placeholder="Search…"
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+              />
             </div>
             <div className="projects-grid">
-              {list.map((p) => (
+              {filteredList.map((p) => (
                 <Link key={p.project_id} to={`/projects/${p.project_id}`} className="project-link">
                   <Card hover className="project-card">
                     <div className="project-card-top">
@@ -278,15 +362,32 @@ export default function Projects() {
                       <span className="project-framework">{p.framework}</span>
                       <span className="project-date">{formatDate(p.updated_at)}</span>
                     </div>
-                    <button
-                      className="project-delete"
-                      onClick={(e) => handleDelete(p.project_id, e)}
-                      title="Delete"
-                    >
-                      <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                        <path d="M1 1l12 12M13 1L1 13" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-                      </svg>
-                    </button>
+                    <div className="project-card-actions">
+                      <button
+                        className="project-action-btn"
+                        onClick={(e) => handleDuplicate(p.project_id, e)}
+                        title="Duplicate"
+                        disabled={duplicating === p.project_id}
+                      >
+                        {duplicating === p.project_id ? (
+                          <div className="project-action-spinner" />
+                        ) : (
+                          <svg width="13" height="13" viewBox="0 0 14 14" fill="none">
+                            <rect x="4" y="4" width="8" height="8" rx="1.5" stroke="currentColor" strokeWidth="1.2"/>
+                            <path d="M2 10V2h8" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+                          </svg>
+                        )}
+                      </button>
+                      <button
+                        className="project-action-btn project-delete"
+                        onClick={(e) => handleDelete(p.project_id, e)}
+                        title="Delete"
+                      >
+                        <svg width="13" height="13" viewBox="0 0 14 14" fill="none">
+                          <path d="M1.75 3.5h10.5M5.25 3.5V2.333c0-.322.261-.583.583-.583h2.334c.322 0 .583.261.583.583V3.5m1.75 0v8.167c0 .322-.261.583-.583.583H4.083a.583.583 0 01-.583-.583V3.5h7" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+                        </svg>
+                      </button>
+                    </div>
                   </Card>
                 </Link>
               ))}
@@ -368,6 +469,14 @@ export default function Projects() {
                 <div className="sidebar-shortcut">
                   <kbd>Shift + Enter</kbd>
                   <span>New line</span>
+                </div>
+                <div className="sidebar-shortcut">
+                  <kbd>⌘S / Ctrl+S</kbd>
+                  <span>Save in editor</span>
+                </div>
+                <div className="sidebar-shortcut">
+                  <kbd>Right-click</kbd>
+                  <span>File actions (AI)</span>
                 </div>
               </div>
             </div>

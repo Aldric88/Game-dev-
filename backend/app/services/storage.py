@@ -26,7 +26,7 @@ class StorageManager:
 
     async def connect(self) -> None:
         try:
-            kwargs: dict = {"serverSelectionTimeoutMS": 3000}
+            kwargs: dict = {"serverSelectionTimeoutMS": 10000}
             # On macOS the system Python doesn't use the OS certificate store.
             # Pass certifi's CA bundle so TLS works for Atlas (mongodb+srv://).
             if settings.mongodb_uri.startswith("mongodb+srv://") or "tls=true" in settings.mongodb_uri.lower():

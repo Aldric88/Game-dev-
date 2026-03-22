@@ -75,16 +75,70 @@ def zip_project(project_name: str, project_id: str) -> bytes | None:
     return buf.read()
 
 
+_PWA_MANIFEST = """{
+  "name": "Game",
+  "short_name": "Game",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#000000",
+  "theme_color": "#000000",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎮</text></svg>",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}"""
+
+_PWA_SW = (
+    "const C='game-v1';"
+    "self.addEventListener('install',e=>e.waitUntil(caches.open(C).then(c=>c.addAll(['/']))));"
+    "self.addEventListener('fetch',e=>e.respondWith(caches.match(e.request).then(r=>r||fetch(e.request))));"
+)
+
+_PWA_HEAD_INJECT = (
+    "<link rel=\"manifest\" href=\"manifest.json\">\n"
+    "<script>if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js');</script>"
+)
+
+
 def zip_project_from_files(project_name: str, files: dict[str, str]) -> bytes:
-    """Create an in-memory ZIP purely from the files dict (no disk needed)."""
+    """Create an in-memory ZIP purely from the files dict (no disk needed).
+
+    Injects PWA manifest and service worker so the exported game can be
+    installed as a Progressive Web App and works offline.
+    """
+    import posixpath
+
     safe_name = _sanitize(project_name) or "untitled"
+
+    # Work on a shallow copy so we don't mutate the caller's dict
+    output_files = dict(files)
+
+    # Inject PWA assets if not already supplied
+    if "manifest.json" not in output_files:
+        output_files["manifest.json"] = _PWA_MANIFEST
+
+    if "sw.js" not in output_files:
+        output_files["sw.js"] = _PWA_SW
+
+    # Patch index.html to register manifest + service worker
+    if "index.html" in output_files:
+        html = output_files["index.html"]
+        if _PWA_HEAD_INJECT not in html:
+            if "</head>" in html:
+                html = html.replace("</head>", f"{_PWA_HEAD_INJECT}\n</head>")
+            elif "</body>" in html:
+                html = html.replace("</body>", f"{_PWA_HEAD_INJECT}\n</body>")
+        output_files["index.html"] = html
+
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        for filename, content in files.items():
+        for filename, content in output_files.items():
             # Normalise the archive entry path to prevent zip-slip attacks.
             # posixpath.normpath collapses '..' components; we also strip any
             # leading slashes so the entry is always relative.
-            import posixpath
             safe_entry = posixpath.normpath(filename).lstrip("/")
             if safe_entry.startswith(".."):
                 logger.warning("Skipping unsafe archive entry %r", filename)

@@ -1,0 +1,31 @@
+# Python venvs
+backend/.venv/
+backend/.venv_local/
+backend/venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+
+# Environment files
+**/.env
+*.env
+!*.env.example
+
+# Node
+frontend/node_modules/
+frontend/dist/
+
+# Runtime
+.run/
+*.pid
+*.log
+*.err
+
+# Generated output
+generatedprojects/
+
+# OS
+.DS_Store
+Thumbs.db

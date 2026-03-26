@@ -44,6 +44,7 @@ export default function Projects() {
   const [searchResults, setSearchResults] = useState(null); // null = show full list
   const [searchMeta, setSearchMeta]   = useState({});       // project_id -> match_type
   const [searchInfo, setSearchInfo]   = useState(null);     // {keyword_hits, ml_hits, ...}
+  const [suggestions, setSuggestions] = useState([]);
 
   const inputRef      = useRef(null);
   const fileRef       = useRef(null);
@@ -75,6 +76,12 @@ export default function Projects() {
 
   useEffect(() => { load(); }, [load]);
 
+  useEffect(() => {
+    api.searchSuggestions()
+      .then(setSuggestions)
+      .catch(() => {});
+  }, []);
+
   /* ── Debounced hybrid search ── */
   useEffect(() => {
     if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
@@ -101,12 +108,17 @@ export default function Projects() {
           predicted_game_type: data.predicted_game_type,
         });
       } catch {
-        // Backend unavailable — fall back to client-side filter silently
+        // Backend unavailable — fall back to client-side per-token OR filter
+        const tokens = search.toLowerCase().split(/\s+/).filter(t => t.length >= 2);
         setSearchResults(
-          list.filter(p =>
-            p.name.toLowerCase().includes(search.toLowerCase()) ||
-            (p.description || '').toLowerCase().includes(search.toLowerCase())
-          )
+          list.filter(p => {
+            const haystack = [
+              p.name,
+              p.description || '',
+              p.framework || '',
+            ].join(' ').toLowerCase();
+            return tokens.some(t => haystack.includes(t));
+          })
         );
         setSearchMeta({});
         setSearchInfo(null);

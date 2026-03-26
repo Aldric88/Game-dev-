@@ -17,6 +17,7 @@ _WEIGHTS = {
     "created":  3.0,
     "liked":    2.0,
     "searched": 1.0,
+    "played":   1.5,
 }
 
 
@@ -31,6 +32,7 @@ class RecommendationService:
         search_history: list[dict],
         public_projects: list[dict],
         limit: int = 10,
+        play_history: list[dict] = [],
     ) -> list[dict]:
         """
         Return up to `limit` public projects personalised for the user.
@@ -64,6 +66,12 @@ class RecommendationService:
             conf = float(event.get("confidence", 0.5))
             if gt and conf >= 0.50:
                 prefs[gt] += _WEIGHTS["searched"] * conf
+
+        # Signal 4 — played games
+        for event in play_history[-20:]:
+            gt = event.get("game_type")
+            if gt:
+                prefs[gt] += _WEIGHTS["played"]
 
         liked_set = set(liked_project_ids)
 

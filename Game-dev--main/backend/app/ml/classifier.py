@@ -37,6 +37,22 @@ MODEL_PATH = BASE_DIR / "models" / "game_type_classifier.pkl"
 _pipeline = None
 
 
+def reload_model() -> bool:
+    """
+    Hot-reload the model from disk without restarting the server.
+    Called automatically after dynamic retraining.
+    Returns True if model loaded successfully.
+    """
+    global _pipeline
+    _pipeline = None          # clear cached model
+    result = _load_model()    # reload from .pkl
+    if result is not None:
+        logger.info("Classifier hot-reloaded successfully.")
+        return True
+    logger.warning("Classifier hot-reload failed — model file not found.")
+    return False
+
+
 def _load_model():
     global _pipeline
     if _pipeline is not None:

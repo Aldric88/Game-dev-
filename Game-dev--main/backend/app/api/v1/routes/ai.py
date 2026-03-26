@@ -22,6 +22,7 @@ from app.schemas.ai import (
 from app.schemas.project import ProjectResponse
 from app.services.ai_orchestrator import ai_orchestrator
 from app.services.local_storage import save_project_files, zip_project, zip_project_from_files, open_project_folder, launch_godot
+from app.services.ml_feedback import record_game_creation
 from app.services.rate_limiter import ai_rate_limiter
 from app.services.realtime import RealtimeManager
 from app.services.s3_storage import s3_storage
@@ -134,6 +135,16 @@ async def generate_design(
 
     if realtime:
         await realtime.broadcast(request.project_id, "design_generated", {"summary": result.summary})
+
+    # Capture ML training signal — fire-and-forget
+    game_type = result.payload.get("game_type") if result.payload else None
+    if game_type and request.prompt:
+        asyncio.create_task(record_game_creation(
+            storage=storage,
+            prompt=request.prompt,
+            game_type=game_type,
+            confidence=1.0,   # AI-confirmed game type = fully trusted signal
+        ))
 
     return AIDesignResponse(
         summary=result.summary,

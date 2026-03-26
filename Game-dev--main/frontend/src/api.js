@@ -132,6 +132,10 @@ export const projects = {
     request(`/api/v1/projects/${id}/visibility`, { method: 'PATCH' }),
   toggleLike: (id) =>
     request(`/api/v1/projects/${id}/like`, { method: 'POST' }),
+  recordPlay: (id) =>
+    request(`/api/v1/projects/${id}/play`, { method: 'POST' }),
+  searchSuggestions: () =>
+    request('/api/v1/projects/search/suggestions'),
 };
 
 /* ── AI ── */

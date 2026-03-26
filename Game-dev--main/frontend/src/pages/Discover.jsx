@@ -47,17 +47,18 @@ function ProjectCard({ project, onLike, liking, user }) {
         </span>
       </div>
       <div className="dc-card-footer">
-        <a
-          href={getPublicPlayUrl(p.project_id)}
-          target="_blank"
-          rel="noopener noreferrer"
+        <button
           className="dc-play-btn"
+          onClick={() => {
+            if (user) api.recordPlay(p.project_id).catch(() => {});
+            window.open(getPublicPlayUrl(p.project_id), '_blank', 'noopener,noreferrer');
+          }}
         >
           <svg width="10" height="12" viewBox="0 0 10 12" fill="currentColor">
             <path d="M1 1l8 5-8 5V1z" />
           </svg>
           Play
-        </a>
+        </button>
       </div>
     </div>
   );
@@ -79,6 +80,7 @@ export default function Discover() {
   const [recsError, setRecsError]     = useState(false);
 
   const [liking, setLiking]           = useState({});
+  const [suggestions, setSuggestions] = useState([]);
   const timerRef                      = useRef(null);
 
   // Load popular (top 6) once
@@ -96,6 +98,14 @@ export default function Discover() {
       .then(setRecs)
       .catch(() => setRecsError(true))
       .finally(() => setRecsLoading(false));
+  }, [user]);
+
+  // Load search suggestions (auth-gated)
+  useEffect(() => {
+    if (!user) return;
+    api.searchSuggestions()
+      .then(setSuggestions)
+      .catch(() => {});
   }, [user]);
 
   // Debounced search
@@ -160,6 +170,20 @@ export default function Discover() {
             </button>
           )}
         </div>
+        {!search && suggestions.length > 0 && (
+          <div className="dc-suggestions">
+            <span className="dc-suggestions-label">Try:</span>
+            {suggestions.map(s => (
+              <button
+                key={s}
+                className="dc-suggestion-chip"
+                onClick={() => setSearch(s)}
+              >
+                {s}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* ── Search results (replaces sections when active) ── */}

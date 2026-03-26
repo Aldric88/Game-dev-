@@ -123,11 +123,34 @@ async def discover_projects(
     storage: StorageManager = Depends(get_storage),
     current_user: dict | None = Depends(get_current_user_optional),
 ) -> list[ProjectResponse]:
-    """Return public projects sorted by likes. Optional text search and limit."""
-    projects = await storage.list_public_projects(search=(q or "").strip(), limit=limit)
+    """Return public projects sorted by likes. Uses hybrid ML+keyword search when a query is given."""
+    query = (q or "").strip()
     user_id = current_user["user_id"] if current_user else None
+
+    if not query:
+        # No search — return top projects by likes
+        projects = await storage.list_public_projects(search="", limit=limit)
+        result = []
+        for p in projects:
+            resp = ProjectResponse(**p)
+            if user_id:
+                resp.user_liked = user_id in p.get("liked_by", [])
+            result.append(resp)
+        return result
+
+    # With a query — run hybrid ML search over all public projects
+    public_projects = await storage.list_public_projects(search="", limit=500)
+    project_dicts = [p if isinstance(p, dict) else dict(p) for p in public_projects]
+    search_result = search_service.search(query, project_dicts)
+
+    seen = set()
     result = []
-    for p in projects:
+    for item in search_result["results"][:limit]:
+        p   = item["project"]
+        pid = p.get("project_id", "")
+        if pid in seen:
+            continue
+        seen.add(pid)
         resp = ProjectResponse(**p)
         if user_id:
             resp.user_liked = user_id in p.get("liked_by", [])
@@ -144,11 +167,12 @@ async def get_recommendations(
     import asyncio
     user_id = current_user["user_id"]
 
-    user_projects, public_projects, liked_ids, search_history = await asyncio.gather(
+    user_projects, public_projects, liked_ids, search_history, play_history = await asyncio.gather(
         storage.list_projects(user_id),
         storage.list_public_projects(limit=200),
         storage.get_user_liked_project_ids(user_id),
         storage.get_search_history(user_id),
+        storage.get_user_play_history(user_id),
     )
 
     liked_set   = set(liked_ids)
@@ -160,6 +184,7 @@ async def get_recommendations(
         liked_project_ids=liked_ids,
         liked_projects=liked_projects,
         search_history=search_history,
+        play_history=play_history,
         public_projects=public_projects,
         limit=10,
     )
@@ -171,6 +196,47 @@ async def get_recommendations(
         resp.user_liked = user_id_str in p.get("liked_by", [])
         result.append(resp)
     return result
+
+
+@router.get("/search/suggestions", response_model=list[str])
+async def search_suggestions(
+    storage: StorageManager = Depends(get_storage),
+    current_user: dict = Depends(get_current_user),
+) -> list[str]:
+    """Return top genre-based search suggestions from user activity."""
+    import asyncio
+    from collections import defaultdict
+    user_id = current_user["user_id"]
+
+    user_projects, search_history, play_history = await asyncio.gather(
+        storage.list_projects(user_id),
+        storage.get_search_history(user_id),
+        storage.get_user_play_history(user_id),
+    )
+
+    prefs: dict[str, float] = defaultdict(float)
+
+    for p in user_projects:
+        gt = (p.get("design_doc") or {}).get("game_type")
+        if gt:
+            prefs[gt] += 3.0
+
+    for event in play_history[-20:]:
+        gt = event.get("game_type")
+        if gt:
+            prefs[gt] += 1.5
+
+    for event in search_history[-20:]:
+        gt = event.get("predicted_game_type")
+        conf = float(event.get("confidence", 0.5))
+        if gt and conf >= 0.50:
+            prefs[gt] += conf
+
+    if not prefs:
+        return []
+
+    sorted_genres = sorted(prefs.items(), key=lambda x: x[1], reverse=True)
+    return [g.replace("_", " ") for g, _ in sorted_genres[:5]]
 
 
 @router.patch("/{project_id}/visibility", response_model=ProjectResponse)
@@ -189,6 +255,25 @@ async def toggle_visibility(
     return ProjectResponse(**(updated or project))
 
 
+@router.post("/{project_id}/play")
+async def record_play(
+    project_id: str,
+    storage: StorageManager = Depends(get_storage),
+    current_user: dict = Depends(get_current_user),
+) -> dict:
+    """Record that the authenticated user played this game."""
+    project = await storage.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    game_type = (project.get("design_doc") or {}).get("game_type", "")
+    if game_type:
+        import asyncio
+        asyncio.create_task(storage.record_user_play(
+            current_user["user_id"], project_id, game_type
+        ))
+    return {"ok": True}
+
+
 @router.post("/{project_id}/like")
 async def toggle_like(
     project_id: str,
@@ -203,6 +288,25 @@ async def toggle_like(
         raise HTTPException(status_code=403, detail="Project is not public")
     result = await storage.toggle_like(project_id, current_user["user_id"])
     return result
+
+
+@router.post("/{project_id}/play")
+async def record_play(
+    project_id: str,
+    storage: StorageManager = Depends(get_storage),
+    current_user: dict = Depends(get_current_user),
+) -> dict:
+    """Record that the authenticated user played this game."""
+    project = await storage.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    game_type = (project.get("design_doc") or {}).get("game_type", "")
+    if game_type:
+        import asyncio
+        asyncio.create_task(storage.record_user_play(
+            current_user["user_id"], project_id, game_type
+        ))
+    return {"ok": True}
 
 
 @router.get("/{project_id}", response_model=ProjectResponse)

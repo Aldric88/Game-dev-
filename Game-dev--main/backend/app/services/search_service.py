@@ -57,10 +57,17 @@ def _tokenize(text: str) -> list[str]:
     return [t for t in tokens if t not in _STOP_WORDS and len(t) >= 2]
 
 
-def _score_project(tokens: list[str], project: dict) -> tuple[float, list[str]]:
+def _score_project(tokens: list[str], project: dict, raw_query: str = "") -> tuple[float, list[str]]:
     """
     Score a project against a list of query tokens.
     Returns (composite_score, list_of_matched_terms).
+
+    Scoring priority:
+      1. Exact name match (raw_query == name)       +3.0  — always ranks first
+      2. Word-boundary token match in name          +1.0
+      3. Substring token match in name (partial)    +0.5  — catches prefix/partial typing
+      4. Exact game_type match bonus                +0.5  — e.g. searching "platformer"
+      5. Other field matches (description, mechanics, framework)
     """
     name        = project.get("name", "").lower()
     description = project.get("description", "").lower()
@@ -72,16 +79,27 @@ def _score_project(tokens: list[str], project: dict) -> tuple[float, list[str]]:
     score   = 0.0
     matched = set()
 
+    # Exact name match — guaranteed top rank
+    if raw_query and raw_query.lower() == name:
+        score += 3.0
+        matched.add(raw_query.lower())
+
     for token in tokens:
         hit = False
         if _contains(token, name):
             score += _WEIGHTS["name"]
+            hit = True
+        elif token in name:                   # partial/prefix match in name
+            score += _WEIGHTS["name"] * 0.5
             hit = True
         if _contains(token, description):
             score += _WEIGHTS["description"]
             hit = True
         if _contains(token, game_type):
             score += _WEIGHTS["game_type"]
+            hit = True
+        if token == game_type:                # exact game_type match bonus
+            score += 0.5
             hit = True
         if _contains(token, mechanics):
             score += _WEIGHTS["mechanics"]
@@ -136,13 +154,18 @@ class HybridSearchService:
 
         tokens = _tokenize(query)
 
+        # If the entire query was stop words or too short, fall back to the raw
+        # query as a single token so exact / substring name matches still work.
+        if not tokens and len(query.strip()) >= 2:
+            tokens = [query.strip().lower()]
+
         # ── Stage 1: Keyword search ────────────────────────────────────────────
         keyword_results: dict[str, dict] = {}
 
         if tokens:
             for project in projects:
                 pid = project.get("project_id", "")
-                score, matched = _score_project(tokens, project)
+                score, matched = _score_project(tokens, project, raw_query=query.strip())
                 if score > 0:
                     keyword_results[pid] = {
                         "project":       project,

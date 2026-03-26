@@ -23,6 +23,7 @@ class StorageManager:
         self._lock = asyncio.Lock()
         self._memory_users: dict[str, dict] = {}
         self._memory_projects: dict[str, dict] = {}
+        self._memory_ml_examples: list[dict] = []
 
     async def connect(self) -> None:
         try:
@@ -92,6 +93,12 @@ class StorageManager:
         if self._mongo_db is None:
             raise RuntimeError("MongoDB database is not initialized")
         return self._mongo_db[self._projects_collection_name]
+
+    @property
+    def _mongo_ml_examples(self):
+        if self._mongo_db is None:
+            raise RuntimeError("MongoDB database is not initialized")
+        return self._mongo_db["ml_training_data"]
 
     @staticmethod
     def _normalize_doc(doc: dict) -> dict:
@@ -375,6 +382,34 @@ class StorageManager:
         user = self._memory_users.get(user_id, {})
         return user.get("search_history", [])[-20:]
 
+    async def record_user_play(self, user_id: str, project_id: str, game_type: str) -> None:
+        """Record a user playing a game, keeping last 50 entries."""
+        event = {
+            "project_id": project_id,
+            "game_type": game_type,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        if self.mode == "mongo":
+            await self._mongo_users.update_one(
+                {"user_id": user_id},
+                {"$push": {"play_history": {"$each": [event], "$slice": -50}}},
+            )
+        else:
+            async with self._lock:
+                user = self._memory_users.get(user_id)
+                if user:
+                    hist = user.setdefault("play_history", [])
+                    hist.append(event)
+                    user["play_history"] = hist[-50:]
+
+    async def get_user_play_history(self, user_id: str) -> list[dict[str, Any]]:
+        """Return the user's last 20 played games."""
+        if self.mode == "mongo":
+            doc = await self._mongo_users.find_one({"user_id": user_id}, {"play_history": 1})
+            return (doc or {}).get("play_history", [])[-20:]
+        user = self._memory_users.get(user_id, {})
+        return user.get("play_history", [])[-20:]
+
     async def get_user_liked_project_ids(self, user_id: str) -> list[str]:
         """Return IDs of all public projects liked by this user."""
         if self.mode == "mongo":
@@ -389,3 +424,45 @@ class StorageManager:
             for p in self._memory_projects.values()
             if p.get("is_public") and user_id in p.get("liked_by", [])
         ]
+
+    # ── ML Training Data ──────────────────────────────────────────────────────
+
+    async def add_ml_example(self, text: str, label: str, confidence: float = 1.0) -> None:
+        """Save a user-generated training signal to the ml_training_data collection."""
+        doc = {
+            "text":       text,
+            "label":      label,
+            "confidence": confidence,
+            "trained":    False,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        if self.mode == "mongo":
+            await self._mongo_ml_examples.insert_one(doc)
+        else:
+            async with self._lock:
+                self._memory_ml_examples.append(doc)
+
+    async def count_pending_ml_examples(self) -> int:
+        """Count untrained user examples accumulated since last retrain."""
+        if self.mode == "mongo":
+            return await self._mongo_ml_examples.count_documents({"trained": False})
+        return sum(1 for e in self._memory_ml_examples if not e.get("trained"))
+
+    async def get_all_ml_examples(self) -> list[dict[str, Any]]:
+        """Return all user-contributed training examples."""
+        if self.mode == "mongo":
+            docs = await self._mongo_ml_examples.find({}, {"_id": 0}).to_list(length=10000)
+            return docs
+        return list(self._memory_ml_examples)
+
+    async def mark_ml_examples_trained(self) -> None:
+        """Mark all pending examples as trained after a successful retrain."""
+        if self.mode == "mongo":
+            await self._mongo_ml_examples.update_many(
+                {"trained": False},
+                {"$set": {"trained": True}},
+            )
+        else:
+            async with self._lock:
+                for e in self._memory_ml_examples:
+                    e["trained"] = True

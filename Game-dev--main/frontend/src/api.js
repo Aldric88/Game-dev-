@@ -136,6 +136,8 @@ export const projects = {
     request(`/api/v1/projects/${id}/play`, { method: 'POST' }),
   searchSuggestions: () =>
     request('/api/v1/projects/search/suggestions'),
+  similarGames: (id) =>
+    request(`/api/v1/projects/${id}/similar`),
 };
 
 /* ── AI ── */

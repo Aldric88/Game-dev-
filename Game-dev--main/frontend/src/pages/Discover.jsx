@@ -20,7 +20,7 @@ function Spinner() {
   return <div className="dc-spinner" />;
 }
 
-function ProjectCard({ project, onLike, liking, user }) {
+function ProjectCard({ project, onLike, liking, user, onSimilar }) {
   const p = project;
   return (
     <div className="dc-card">
@@ -59,6 +59,9 @@ function ProjectCard({ project, onLike, liking, user }) {
           </svg>
           Play
         </button>
+        <button className="dc-similar-btn" onClick={() => onSimilar(p)} title="Find similar games">
+          Similar
+        </button>
       </div>
     </div>
   );
@@ -81,6 +84,9 @@ export default function Discover() {
 
   const [liking, setLiking]           = useState({});
   const [suggestions, setSuggestions] = useState([]);
+  const [similarFor, setSimilarFor]   = useState(null);   // { project_id, name }
+  const [similarList, setSimilarList] = useState([]);
+  const [similarLoading, setSimilarLoading] = useState(false);
   const timerRef                      = useRef(null);
 
   // Load popular (top 6) once
@@ -141,6 +147,20 @@ export default function Discover() {
     finally { setLiking(prev => ({ ...prev, [project.project_id]: false })); }
   }, [user, liking, navigate, updateLikes]);
 
+  const handleSimilar = useCallback(async (project) => {
+    if (similarFor?.project_id === project.project_id) {
+      setSimilarFor(null); setSimilarList([]); return;
+    }
+    setSimilarFor({ project_id: project.project_id, name: project.name });
+    setSimilarList([]);
+    setSimilarLoading(true);
+    try {
+      const results = await api.similarGames(project.project_id);
+      setSimilarList(results || []);
+    } catch { setSimilarList([]); }
+    finally { setSimilarLoading(false); }
+  }, [similarFor]);
+
   const isSearching = search.trim().length > 0;
 
   return (
@@ -196,7 +216,7 @@ export default function Discover() {
           ) : (
             <div className="dc-grid">
               {searchResults.map(p => (
-                <ProjectCard key={p.project_id} project={p} onLike={handleLike} liking={liking} user={user} />
+                <ProjectCard key={p.project_id} project={p} onLike={handleLike} liking={liking} user={user} onSimilar={handleSimilar} />
               ))}
             </div>
           )}
@@ -223,12 +243,38 @@ export default function Discover() {
                     {i < 3 && (
                       <span className={`dc-rank dc-rank-${i + 1}`}>#{i + 1}</span>
                     )}
-                    <ProjectCard project={p} onLike={handleLike} liking={liking} user={user} />
+                    <ProjectCard project={p} onLike={handleLike} liking={liking} user={user} onSimilar={handleSimilar} />
                   </div>
                 ))}
               </div>
             )}
           </div>
+
+          {/* ── Similar Games ── */}
+          {similarFor && (
+            <div className="dc-section dc-similar-section">
+              <div className="dc-section-header">
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                  <circle cx="5" cy="5" r="3" stroke="#34d399" strokeWidth="1.2" />
+                  <circle cx="10" cy="9" r="2.5" stroke="#34d399" strokeWidth="1.2" />
+                  <path d="M7.5 6.5l1.5 1.5" stroke="#34d399" strokeWidth="1.2" strokeLinecap="round" />
+                </svg>
+                <h2 className="dc-section-title">Similar to "{similarFor.name}"</h2>
+                <button className="dc-similar-close" onClick={() => { setSimilarFor(null); setSimilarList([]); }}>✕</button>
+              </div>
+              {similarLoading ? (
+                <div className="dc-center"><Spinner /></div>
+              ) : similarList.length === 0 ? (
+                <div className="dc-empty">No similar games found yet — more games needed to cluster.</div>
+              ) : (
+                <div className="dc-grid">
+                  {similarList.map(p => (
+                    <ProjectCard key={p.project_id} project={p} onLike={handleLike} liking={liking} user={user} onSimilar={handleSimilar} />
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* ── For You ── */}
           <div className="dc-section">
@@ -257,7 +303,7 @@ export default function Discover() {
             ) : (
               <div className="dc-grid">
                 {recs.map(p => (
-                  <ProjectCard key={p.project_id} project={p} onLike={handleLike} liking={liking} user={user} />
+                  <ProjectCard key={p.project_id} project={p} onLike={handleLike} liking={liking} user={user} onSimilar={handleSimilar} />
                 ))}
               </div>
             )}

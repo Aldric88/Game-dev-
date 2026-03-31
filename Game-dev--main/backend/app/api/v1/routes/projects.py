@@ -198,6 +198,27 @@ async def get_recommendations(
     return result
 
 
+@router.get("/{project_id}/similar", response_model=list[ProjectResponse])
+async def similar_projects(
+    project_id: str,
+    storage: StorageManager = Depends(get_storage),
+    current_user: dict | None = Depends(get_current_user_optional),
+) -> list[ProjectResponse]:
+    """Return projects similar to the given project using K-Means clustering."""
+    from app.ml.cluster_service import cluster_service
+    public_projects = await storage.list_public_projects(search="", limit=500)
+    project_dicts   = [p if isinstance(p, dict) else dict(p) for p in public_projects]
+    similar         = cluster_service.get_similar(project_id, project_dicts, n=6)
+    user_id         = current_user["user_id"] if current_user else None
+    result = []
+    for p in similar:
+        resp = ProjectResponse(**p)
+        if user_id:
+            resp.user_liked = user_id in p.get("liked_by", [])
+        result.append(resp)
+    return result
+
+
 @router.get("/search/suggestions", response_model=list[str])
 async def search_suggestions(
     storage: StorageManager = Depends(get_storage),
@@ -288,25 +309,6 @@ async def toggle_like(
         raise HTTPException(status_code=403, detail="Project is not public")
     result = await storage.toggle_like(project_id, current_user["user_id"])
     return result
-
-
-@router.post("/{project_id}/play")
-async def record_play(
-    project_id: str,
-    storage: StorageManager = Depends(get_storage),
-    current_user: dict = Depends(get_current_user),
-) -> dict:
-    """Record that the authenticated user played this game."""
-    project = await storage.get_project(project_id)
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
-    game_type = (project.get("design_doc") or {}).get("game_type", "")
-    if game_type:
-        import asyncio
-        asyncio.create_task(storage.record_user_play(
-            current_user["user_id"], project_id, game_type
-        ))
-    return {"ok": True}
 
 
 @router.get("/{project_id}", response_model=ProjectResponse)

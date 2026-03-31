@@ -1,14 +1,19 @@
 """
 Recommendation Service
 ======================
-Builds a user preference vector from three signals:
+Builds a user preference vector from four signals:
   1. Game types the user has CREATED  (weight 3.0)
   2. Game types the user has LIKED    (weight 2.0)
   3. Game types from recent SEARCHES  (weight 1.0 × classifier confidence)
+  4. Game types from recent PLAYS     (weight 1.5)
+
+Also applies a K-Means cluster bonus (+1.0) for projects that share a
+content cluster with any game the user has liked, created, or played.
+This makes recommendations more specific than pure genre matching.
 
 Scores every public project against that vector, then ranks by
-(preference_score DESC, likes DESC).  Cold-start (no signals) falls
-back to most-liked projects globally.
+(preference_score + cluster_bonus DESC, likes DESC).  Cold-start (no
+signals) falls back to most-liked projects globally.
 """
 
 from collections import defaultdict
@@ -19,6 +24,8 @@ _WEIGHTS = {
     "searched": 1.0,
     "played":   1.5,
 }
+
+_CLUSTER_BONUS = 1.0   # added to score when project is in a preferred cluster
 
 
 class RecommendationService:
@@ -86,9 +93,33 @@ class RecommendationService:
         if not prefs:
             return sorted(candidates, key=lambda p: p.get("likes", 0), reverse=True)[:limit]
 
+        # ── K-Means cluster bonus ──────────────────────────────────────────────
+        # Find which projects share a cluster with games the user has interacted with.
+        # Seed projects = liked + created + recently played games.
+        cluster_pids: set[str] = set()
+        try:
+            from app.ml.cluster_service import cluster_service
+            all_dicts = [p if isinstance(p, dict) else dict(p) for p in public_projects]
+
+            seed_ids = (
+                {p.get("project_id") for p in liked_projects}
+                | {p.get("project_id") for p in user_projects if p.get("is_public")}
+                | {e.get("project_id") for e in play_history[-20:]}
+            )
+
+            for seed_id in seed_ids:
+                if not seed_id:
+                    continue
+                similar = cluster_service.get_similar(seed_id, all_dicts, n=20)
+                cluster_pids.update(p.get("project_id") for p in similar)
+        except Exception:
+            pass   # clustering is optional — fall back to genre-only gracefully
+
         def _score(p: dict) -> tuple[float, int]:
-            gt = (p.get("design_doc") or {}).get("game_type", "")
-            return (prefs.get(gt, 0.0), p.get("likes", 0))
+            gt            = (p.get("design_doc") or {}).get("game_type", "")
+            genre_score   = prefs.get(gt, 0.0)
+            cluster_bonus = _CLUSTER_BONUS if p.get("project_id") in cluster_pids else 0.0
+            return (genre_score + cluster_bonus, p.get("likes", 0))
 
         return sorted(candidates, key=_score, reverse=True)[:limit]
 

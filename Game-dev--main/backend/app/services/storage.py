@@ -24,6 +24,7 @@ class StorageManager:
         self._memory_users: dict[str, dict] = {}
         self._memory_projects: dict[str, dict] = {}
         self._memory_ml_examples: list[dict] = []
+        self._memory_mapl: list[dict] = []
 
     async def connect(self) -> None:
         try:
@@ -66,6 +67,13 @@ class StorageManager:
             await self._mongo_projects.create_index(
                 [("is_public", 1), ("likes", -1)], background=True
             )
+            # MAPL memory indexes
+            await self._mongo_mapl_memories.create_index("memory_id", unique=True, background=True)
+            await self._mongo_mapl_memories.create_index("user_id", background=True)
+            await self._mongo_mapl_memories.create_index(
+                [("state.game_type", 1), ("reward", -1)], background=True
+            )
+            await self._mongo_mapl_memories.create_index("timestamp", background=True)
             _storage_logger.info("MongoDB indexes ensured.")
         except Exception as exc:
             _storage_logger.warning("Could not create MongoDB indexes: %s", exc)
@@ -99,6 +107,12 @@ class StorageManager:
         if self._mongo_db is None:
             raise RuntimeError("MongoDB database is not initialized")
         return self._mongo_db["ml_training_data"]
+
+    @property
+    def _mongo_mapl_memories(self):
+        if self._mongo_db is None:
+            raise RuntimeError("MongoDB database is not initialized")
+        return self._mongo_db["mapl_memories"]
 
     @staticmethod
     def _normalize_doc(doc: dict) -> dict:
@@ -466,3 +480,93 @@ class StorageManager:
             async with self._lock:
                 for e in self._memory_ml_examples:
                     e["trained"] = True
+
+    # ── MAPL Memory ───────────────────────────────────────────────────────────
+
+    async def add_mapl_memory(self, doc: dict[str, Any]) -> None:
+        """Persist a MAPL experience memory to long-term storage."""
+        if self.mode == "mongo":
+            await self._mongo_mapl_memories.insert_one(doc)
+        else:
+            async with self._lock:
+                self._memory_mapl.append(doc)
+
+    async def get_mapl_memories(
+        self,
+        user_id: str = "",
+        game_type: str = "",
+        limit: int = 200,
+    ) -> list[dict[str, Any]]:
+        """Retrieve MAPL memories, optionally filtered by user or game type."""
+        if self.mode == "mongo":
+            query: dict[str, Any] = {}
+            if user_id:
+                query["user_id"] = user_id
+            if game_type:
+                query["state.game_type"] = game_type
+            cursor = self._mongo_mapl_memories.find(
+                query, {"_id": 0}
+            ).sort("timestamp", -1).limit(limit)
+            return await cursor.to_list(length=limit)
+        # In-memory fallback
+        results = self._memory_mapl
+        if user_id:
+            results = [m for m in results if m.get("user_id") == user_id]
+        if game_type:
+            results = [
+                m for m in results
+                if m.get("state", {}).get("game_type") == game_type
+            ]
+        return list(reversed(results[-limit:]))
+
+    async def count_mapl_memories(self) -> int:
+        """Count total long-term MAPL memories."""
+        if self.mode == "mongo":
+            return await self._mongo_mapl_memories.count_documents({})
+        return len(self._memory_mapl)
+
+    async def delete_mapl_memory(self, memory_id: str) -> bool:
+        """Delete a single MAPL memory by ID."""
+        if self.mode == "mongo":
+            result = await self._mongo_mapl_memories.delete_one({"memory_id": memory_id})
+            return result.deleted_count > 0
+        async with self._lock:
+            before = len(self._memory_mapl)
+            self._memory_mapl = [
+                m for m in self._memory_mapl if m.get("memory_id") != memory_id
+            ]
+            return len(self._memory_mapl) < before
+
+    async def prune_mapl_memories(
+        self,
+        max_age_hours: float = 2160,
+        min_reward: float = 0.0,
+    ) -> int:
+        """Remove old, low-reward long-term memories. Returns count pruned."""
+        from datetime import datetime, timezone
+        cutoff = datetime.now(timezone.utc).timestamp() - (max_age_hours * 3600)
+        pruned = 0
+
+        if self.mode == "mongo":
+            cutoff_iso = datetime.fromtimestamp(cutoff, tz=timezone.utc).isoformat()
+            result = await self._mongo_mapl_memories.delete_many({
+                "timestamp": {"$lt": cutoff_iso},
+                "reward": {"$lt": min_reward},
+            })
+            pruned = result.deleted_count
+        else:
+            async with self._lock:
+                before = len(self._memory_mapl)
+                kept: list[dict] = []
+                for m in self._memory_mapl:
+                    ts_str = m.get("timestamp", "")
+                    try:
+                        ts = datetime.fromisoformat(ts_str).timestamp()
+                    except (ValueError, TypeError):
+                        ts = cutoff + 1  # keep if unparseable
+                    if ts >= cutoff or m.get("reward", 0) >= min_reward:
+                        kept.append(m)
+                self._memory_mapl = kept
+                pruned = before - len(kept)
+
+        return pruned

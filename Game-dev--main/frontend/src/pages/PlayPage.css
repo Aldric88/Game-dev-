@@ -16,10 +16,10 @@
   align-items: center;
   justify-content: space-between;
   padding: 0 20px;
-  height: 44px;
+  height: 48px;
   flex-shrink: 0;
-  background: #050505;
-  border-bottom: 1px solid #111;
+  background: #030303;
+  border-bottom: 1px solid #0f0f0f;
 }
 
 .play-topbar-left {

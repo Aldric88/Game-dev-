@@ -60,96 +60,104 @@ export default function Profile() {
   return (
     <div className="profile-page">
       <div className="profile-container">
-        <h1 className="profile-heading">Profile &amp; Settings</h1>
-        <p className="profile-subheading">Manage your account details and view usage</p>
+        <div className="profile-header">
+          <h1 className="profile-heading">Profile</h1>
+          <p className="profile-subheading">Manage your account and view usage</p>
+        </div>
 
         {loadingProfile ? (
           <div className="profile-loading">
             <div className="profile-spinner" />
           </div>
         ) : (
-          <>
-            {/* ── Account Info ── */}
-            <section className="profile-section">
-              <h2 className="profile-section-title">Account</h2>
-              <div className="profile-field-row">
-                <span className="profile-label">Plan</span>
-                <span className={`profile-plan-badge profile-plan-${profile?.plan || 'free'}`}>
-                  {planLabel}
-                </span>
-              </div>
-              <div className="profile-field-row">
-                <span className="profile-label">Email</span>
-                <span className="profile-value-readonly">{profile?.email || '—'}</span>
-              </div>
-              <div className="profile-field-row">
-                <span className="profile-label">Credits Remaining</span>
-                <span className="profile-value-mono">{creditsRemaining}</span>
-              </div>
-              <div className="profile-field-row">
-                <span className="profile-label">API Calls Used</span>
-                <span className="profile-value-mono">{apiCallsUsed}</span>
-              </div>
-            </section>
-
-            {/* ── Edit Username ── */}
-            <section className="profile-section">
-              <h2 className="profile-section-title">Edit Profile</h2>
-              <form className="profile-form" onSubmit={handleSave}>
-                <label className="profile-input-label">Username</label>
-                <div className="profile-input-row">
-                  <input
-                    className="profile-input"
-                    type="text"
-                    value={username}
-                    onChange={(e) => setUsername(e.target.value)}
-                    placeholder="Your username"
-                    disabled={saving}
-                    maxLength={64}
-                  />
-                  <button
-                    type="submit"
-                    className="profile-save-btn"
-                    disabled={saving || !username.trim() || username.trim() === profile?.username}
-                  >
-                    {saving ? <div className="profile-spinner-sm" /> : 'Save'}
-                  </button>
+          <div className="profile-grid">
+            {/* Left column */}
+            <div className="profile-col">
+              {/* Account Info */}
+              <section className="profile-section">
+                <h2 className="profile-section-title">Account</h2>
+                <div className="profile-field-row">
+                  <span className="profile-label">Plan</span>
+                  <span className={`profile-plan-badge profile-plan-${profile?.plan || 'free'}`}>
+                    {planLabel}
+                  </span>
                 </div>
-                {saveError && <p className="profile-form-error">{saveError}</p>}
-                {saveSuccess && <p className="profile-form-success">Username updated successfully.</p>}
-              </form>
-            </section>
-
-            {/* ── Usage ── */}
-            <section className="profile-section">
-              <h2 className="profile-section-title">Usage</h2>
-              {loadingUsage ? (
-                <div className="profile-loading-inline">
-                  <div className="profile-spinner-sm" />
+                <div className="profile-field-row">
+                  <span className="profile-label">Email</span>
+                  <span className="profile-value-readonly">{profile?.email || '\u2014'}</span>
                 </div>
-              ) : (
-                <div className="profile-usage">
-                  <div className="profile-usage-header">
-                    <span className="profile-usage-label">Credits used this month</span>
-                    <span className="profile-usage-numbers">
-                      {creditsUsed} / {creditsLimit > 0 ? creditsLimit : '—'}
-                    </span>
-                  </div>
-                  <div className="profile-usage-bar-track">
-                    <div
-                      className="profile-usage-bar-fill"
-                      style={{ width: `${usagePct}%` }}
+                <div className="profile-field-row">
+                  <span className="profile-label">Credits Remaining</span>
+                  <span className="profile-value-mono">{creditsRemaining}</span>
+                </div>
+                <div className="profile-field-row">
+                  <span className="profile-label">API Calls Used</span>
+                  <span className="profile-value-mono">{apiCallsUsed}</span>
+                </div>
+              </section>
+
+              {/* Edit Username */}
+              <section className="profile-section">
+                <h2 className="profile-section-title">Edit Profile</h2>
+                <form className="profile-form" onSubmit={handleSave}>
+                  <label className="profile-input-label">Username</label>
+                  <div className="profile-input-row">
+                    <input
+                      className="profile-input"
+                      type="text"
+                      value={username}
+                      onChange={(e) => setUsername(e.target.value)}
+                      placeholder="Your username"
+                      disabled={saving}
+                      maxLength={64}
                     />
+                    <button
+                      type="submit"
+                      className="profile-save-btn"
+                      disabled={saving || !username.trim() || username.trim() === profile?.username}
+                    >
+                      {saving ? <div className="profile-spinner-sm" /> : 'Save'}
+                    </button>
                   </div>
-                  {creditsLimit > 0 && (
-                    <p className="profile-usage-note">
-                      {Math.round(usagePct)}% of monthly limit used
-                    </p>
-                  )}
-                </div>
-              )}
-            </section>
-          </>
+                  {saveError && <p className="profile-form-error">{saveError}</p>}
+                  {saveSuccess && <p className="profile-form-success">Username updated successfully.</p>}
+                </form>
+              </section>
+            </div>
+
+            {/* Right column */}
+            <div className="profile-col">
+              {/* Usage */}
+              <section className="profile-section">
+                <h2 className="profile-section-title">Usage</h2>
+                {loadingUsage ? (
+                  <div className="profile-loading-inline">
+                    <div className="profile-spinner-sm" />
+                  </div>
+                ) : (
+                  <div className="profile-usage">
+                    <div className="profile-usage-header">
+                      <span className="profile-usage-label">Credits used this month</span>
+                      <span className="profile-usage-numbers">
+                        {creditsUsed} / {creditsLimit > 0 ? creditsLimit : '\u2014'}
+                      </span>
+                    </div>
+                    <div className="profile-usage-bar-track">
+                      <div
+                        className="profile-usage-bar-fill"
+                        style={{ width: `${usagePct}%` }}
+                      />
+                    </div>
+                    {creditsLimit > 0 && (
+                      <p className="profile-usage-note">
+                        {Math.round(usagePct)}% of monthly limit used
+                      </p>
+                    )}
+                  </div>
+                )}
+              </section>
+            </div>
+          </div>
         )}
       </div>
     </div>

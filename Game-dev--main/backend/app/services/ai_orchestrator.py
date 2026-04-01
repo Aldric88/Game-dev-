@@ -34,6 +34,8 @@ from app.services.godot_file_generators import (
 )
 from app.services.github_service import search_similar_repos
 from app.services.code_extractor import fetch_reference_code
+from app.schemas.mapl import MemoryAction, MemoryState, Outcome
+from app.services.mapl_service import mapl_service
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +82,8 @@ class AIOrchestrator:
         self,
         prompt: str,
         history: list[dict] | None = None,
+        storage: Any = None,
+        user_id: str = "",
     ) -> OrchestratorResult:
         system = (
             "You are an expert game design architect who creates DETAILED, SPECIFIC game designs. "
@@ -111,7 +115,28 @@ class AIOrchestrator:
             "}"
         )
         history_text = self._format_history(history or [])
-        full_prompt = f"{system}{history_text}\nCURRENT REQUEST: {prompt}"
+        user_prompt = f"{history_text}\nCURRENT REQUEST: {prompt}"
+
+        # ── MAPL: Augment prompt with past experiences (Eq. 4) ────────────
+        mapl_memories = []
+        if storage is not None:
+            try:
+                current_state = MemoryState(prompt=prompt)
+                user_prompt, mapl_memories = await mapl_service.build_augmented_prompt(
+                    current_state=current_state,
+                    base_prompt=user_prompt,
+                    storage=storage,
+                    user_id=user_id,
+                )
+                if mapl_memories:
+                    logger.info(
+                        "MAPL: Augmented design prompt with %d past experiences",
+                        len(mapl_memories),
+                    )
+            except Exception as mapl_err:
+                logger.warning("MAPL augmentation skipped: %s", mapl_err)
+
+        full_prompt = f"{system}\n{user_prompt}"
 
         try:
             result = await provider_manager.generate(full_prompt, temperature=0.7)

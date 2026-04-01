@@ -23,6 +23,8 @@ from app.schemas.project import ProjectResponse
 from app.services.ai_orchestrator import ai_orchestrator
 from app.services.local_storage import save_project_files, zip_project, zip_project_from_files, open_project_folder, launch_godot
 from app.services.ml_feedback import record_game_creation
+from app.services.mapl_service import mapl_service
+from app.schemas.mapl import MemoryAction, MemoryState, Outcome
 from app.services.rate_limiter import ai_rate_limiter
 from app.services.realtime import RealtimeManager
 from app.services.s3_storage import s3_storage
@@ -83,6 +85,42 @@ def _get_realtime(request: Request) -> RealtimeManager | None:
     return getattr(request.app.state, "realtime", None)
 
 
+async def _record_mapl_memory(
+    storage: StorageManager,
+    prompt: str,
+    design_doc: dict,
+    reward: float,
+    outcome: Outcome,
+    user_id: str,
+) -> None:
+    """Fire-and-forget helper to record a MAPL experience memory."""
+    try:
+        game_type = design_doc.get("game_type", "")
+        entities = design_doc.get("entities", [])
+        mechanics = design_doc.get("mechanics", [])
+
+        state = MemoryState(
+            prompt=prompt,
+            game_type=game_type,
+            entity_count=len(entities),
+            context_features={
+                "mechanics": mechanics,
+                "visual_style": design_doc.get("visual_style", {}),
+            },
+        )
+        action = MemoryAction(action_type="generate", temperature=0.7)
+        await mapl_service.store_memory(
+            state=state,
+            action=action,
+            reward=reward,
+            outcome=outcome,
+            user_id=user_id,
+            storage=storage,
+        )
+    except Exception as exc:
+        logger.warning("MAPL memory recording failed: %s", exc)
+
+
 async def _enforce_rate_limit(user_id: str) -> None:
     result = await ai_rate_limiter.check(user_id)
     if not result.allowed:
@@ -118,6 +156,8 @@ async def generate_design(
     result = await ai_orchestrator.generate_design(
         request.prompt,
         history=project.get("ai_conversation", []),
+        storage=storage,
+        user_id=current_user["user_id"],
     )
 
     history = _append_messages(project, request.prompt, result.summary, user_sent_at)
@@ -228,6 +268,19 @@ async def generate_code(
             "agents_used": ["design", "script", "scene", "asset", "assembler"],
             "godot_stats": result.payload.get("godot_stats", {}),
         })
+
+    # ── MAPL: Record successful generation as experience memory ──────────
+    agent_errors = result.payload.get("agent_errors", [])
+    mapl_reward = 1.0 if not agent_errors else max(0.3, 1.0 - 0.1 * len(agent_errors))
+    mapl_outcome = Outcome.SUCCESS if not agent_errors else Outcome.PARTIAL
+    asyncio.create_task(_record_mapl_memory(
+        storage=storage,
+        prompt=request.prompt,
+        design_doc=new_design,
+        reward=mapl_reward,
+        outcome=mapl_outcome,
+        user_id=current_user["user_id"],
+    ))
 
     return AICodeResponse(
         generated_code=result.payload,

@@ -13,6 +13,7 @@ from app.api.v1.routes.ai import router as ai_router
 from app.api.v1.routes.auth import router as auth_router
 from app.api.v1.routes.dashboard import router as dashboard_router
 from app.api.v1.routes.health import router as health_router
+from app.api.v1.routes.mapl import router as mapl_router
 from app.api.v1.routes.preview import router as preview_router
 from app.api.v1.routes.projects import router as projects_router
 from app.api.v1.routes.s3 import router as s3_router
@@ -186,6 +187,7 @@ app.include_router(auth_router, prefix="/api/v1")
 app.include_router(users_router, prefix="/api/v1")
 app.include_router(projects_router, prefix="/api/v1")
 app.include_router(ai_router, prefix="/api/v1")
+app.include_router(mapl_router, prefix="/api/v1")
 app.include_router(dashboard_router, prefix="/api/v1")
 app.include_router(preview_router, prefix="/api/v1")
 app.include_router(s3_router, prefix="/api/v1")

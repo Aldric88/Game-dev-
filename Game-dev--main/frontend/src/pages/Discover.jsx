@@ -260,7 +260,9 @@ export default function Discover() {
                   <path d="M7.5 6.5l1.5 1.5" stroke="#34d399" strokeWidth="1.2" strokeLinecap="round" />
                 </svg>
                 <h2 className="dc-section-title">Similar to "{similarFor.name}"</h2>
-                <button className="dc-similar-close" onClick={() => { setSimilarFor(null); setSimilarList([]); }}>✕</button>
+                <button className="dc-similar-close" onClick={() => { setSimilarFor(null); setSimilarList([]); }}>
+                  <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M1 1l8 8M9 1L1 9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/></svg>
+                </button>
               </div>
               {similarLoading ? (
                 <div className="dc-center"><Spinner /></div>

@@ -57,13 +57,22 @@ export default function Projects() {
     'Space shooter with procedural enemy waves',
   ];
 
+  const TEMPLATE_ICONS = {
+    flappy: <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M5 13c0-3 2-5 5-5s5 2 5 5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/><circle cx="10" cy="5" r="3" stroke="currentColor" strokeWidth="1.2"/><path d="M7 6l-4 2" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/></svg>,
+    platformer: <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M3 15h12M6 15v-4h6v4M9 11V7M7 7h4" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/></svg>,
+    snake: <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M3 9h3v3h3v-3h3V6h3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/><circle cx="15" cy="5" r="1" fill="currentColor"/></svg>,
+    shooter: <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><path d="M9 3v12M6 6l3-3 3 3M5 15h8" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/></svg>,
+    racing: <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><rect x="5" y="4" width="8" height="12" rx="2" stroke="currentColor" strokeWidth="1.2"/><path d="M7 8h4M7 12h4" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/></svg>,
+    puzzle: <svg width="18" height="18" viewBox="0 0 18 18" fill="none"><rect x="3" y="3" width="5" height="5" rx="1" stroke="currentColor" strokeWidth="1.2"/><rect x="10" y="3" width="5" height="5" rx="1" stroke="currentColor" strokeWidth="1.2"/><rect x="3" y="10" width="5" height="5" rx="1" stroke="currentColor" strokeWidth="1.2"/><rect x="10" y="10" width="5" height="5" rx="1" stroke="currentColor" strokeWidth="1.2"/></svg>,
+  };
+
   const TEMPLATES = [
-    { id: 'flappy', name: 'Flappy Bird', desc: 'Classic tap-to-fly obstacle game', emoji: '🐦', prompt: 'Create a flappy bird clone with a bird that flies through pipes. Tap to flap. Score increases each pipe passed. Game over on collision.' },
-    { id: 'platformer', name: 'Platformer', desc: 'Side-scrolling jump adventure', emoji: '🏃', prompt: 'Create a side-scrolling platformer with a character that can run and jump. Include platforms, coins to collect, and enemies to avoid.' },
-    { id: 'snake', name: 'Snake', desc: 'Classic grid movement game', emoji: '🐍', prompt: 'Create a classic snake game on a grid. The snake grows when eating food. Game over if it hits walls or itself. Track high score.' },
-    { id: 'shooter', name: 'Space Shooter', desc: 'Top-down bullet hell', emoji: '🚀', prompt: 'Create a top-down space shooter. Player ship moves and shoots bullets. Waves of alien enemies descend. Collect power-ups. Boss every 3 waves.' },
-    { id: 'racing', name: 'Racing', desc: 'Top-down car racing game', emoji: '🏎️', prompt: 'Create a top-down racing game. Player controls a car around a track. Compete against AI opponents. Collect boost power-ups. 3 laps to win.' },
-    { id: 'puzzle', name: 'Puzzle', desc: 'Block matching puzzle', emoji: '🧩', prompt: 'Create a block puzzle game like Tetris. Blocks fall from the top. Player rotates and positions them. Clear complete rows to score points. Speed increases over time.' },
+    { id: 'flappy', name: 'Flappy Bird', desc: 'Classic tap-to-fly obstacle game', prompt: 'Create a flappy bird clone with a bird that flies through pipes. Tap to flap. Score increases each pipe passed. Game over on collision.' },
+    { id: 'platformer', name: 'Platformer', desc: 'Side-scrolling jump adventure', prompt: 'Create a side-scrolling platformer with a character that can run and jump. Include platforms, coins to collect, and enemies to avoid.' },
+    { id: 'snake', name: 'Snake', desc: 'Classic grid movement game', prompt: 'Create a classic snake game on a grid. The snake grows when eating food. Game over if it hits walls or itself. Track high score.' },
+    { id: 'shooter', name: 'Space Shooter', desc: 'Top-down bullet hell', prompt: 'Create a top-down space shooter. Player ship moves and shoots bullets. Waves of alien enemies descend. Collect power-ups. Boss every 3 waves.' },
+    { id: 'racing', name: 'Racing', desc: 'Top-down car racing game', prompt: 'Create a top-down racing game. Player controls a car around a track. Compete against AI opponents. Collect boost power-ups. 3 laps to win.' },
+    { id: 'puzzle', name: 'Puzzle', desc: 'Block matching puzzle', prompt: 'Create a block puzzle game like Tetris. Blocks fall from the top. Player rotates and positions them. Clear complete rows to score points. Speed increases over time.' },
   ];
 
   const load = useCallback(() => {
@@ -381,7 +390,7 @@ export default function Projects() {
                   window.scrollTo({ top: 0, behavior: 'smooth' });
                 }}
               >
-                <span className="template-emoji">{t.emoji}</span>
+                <span className="template-icon">{TEMPLATE_ICONS[t.id]}</span>
                 <span className="template-name">{t.name}</span>
                 <span className="template-desc">{t.desc}</span>
               </button>

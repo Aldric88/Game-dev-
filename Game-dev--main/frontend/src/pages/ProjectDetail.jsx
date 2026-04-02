@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef, useCallback, useLayoutEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import Editor from '@monaco-editor/react';
-import { projects as projApi, ai as aiApi, getPreviewUrl, getPublicPlayUrl, downloadProjectZip, godot, streamGenerate } from '../api';
+import { projects as projApi, ai as aiApi, getPreviewUrl, getPublicPlayUrl, downloadProjectZip, godot, streamGenerate, streamChat } from '../api';
 import { useAuth } from '../AuthContext';
 import ErrorBoundary from '../components/ErrorBoundary';
 import Modal from '../components/Modal';
@@ -365,80 +365,131 @@ export default function ProjectDetail() {
     if (!text || chatLoading) return;
     setChatLoading(true);
     setChatInput('');
-    setAgentStatus({ design:{status:'pending'}, scripts:{status:'pending'}, scenes:{status:'pending'}, assets:{status:'pending'}, assembler:{status:'pending'} });
 
+    // Optimistically add the user message to the conversation
     setProject(prev => ({ ...prev, ai_conversation: [...(prev.ai_conversation||[]), { role:'user', content:text }] }));
 
-    const timer = setInterval(() => {
-      setAgentStatus(prev => {
-        const next = { ...prev };
-        const order = ['design','scripts','scenes','assets','assembler'];
-        for (const a of order) {
-          if (next[a]?.status === 'pending') { next[a] = { status:'running' }; break; }
-          if (next[a]?.status === 'running')  { next[a] = { status:'complete' }; }
-        }
-        return next;
-      });
-    }, 2800);
+    const projectHasFiles = Object.keys(_extractFiles(project)).length > 0;
 
-    const beforeFiles = { ..._extractFiles(project) };
-    try {
-      await streamGenerate(
-        { project_id: project.project_id, prompt: text, framework: project.framework || 'phaser' },
-        {
-          onAgent: ({ agent, status }) => {
-            clearInterval(timer);
-            setAgentStatus(prev => ({ ...prev, [agent]: { status } }));
-          },
-          onDone: (updatedProject) => {
-            if (!updatedProject) return;
-            const afterFiles = _extractFiles(updatedProject);
-            const changed = Object.keys(afterFiles).filter(f => afterFiles[f] !== beforeFiles[f]);
-            if (changed.length > 0) setDiffFiles({ before: beforeFiles, after: afterFiles, changed });
-            setProject(updatedProject);
-            setEditedFiles({});
-            setIsDirty(false);
-            const names = Object.keys(afterFiles);
-            if (names.length > 0) { openTab(names[0]); }
-            if (previewRef.current) previewRef.current.src = getPreviewUrl(updatedProject.project_id) + '&t=' + Date.now();
-            setTimeout(() => setAgentStatus({}), 2000);
-            setChatLoading(false);
-          },
-          onError: (err) => {
-            clearInterval(timer);
-            setAgentStatus({});
-            if (err.status === 429) showToast(err.message, 'rate', err.retryAfter);
-            else if (err.status === 402) showToast(err.message, 'credits');
-            else showToast(err.message);
-            setChatLoading(false);
-          },
-        }
-      );
-    } catch (err) {
-      clearInterval(timer);
-      setAgentStatus({});
-      if (err.status === 429) { showToast(err.message, 'rate', err.retryAfter); setChatLoading(false); return; }
-      if (err.status === 402) { showToast(err.message, 'credits'); setChatLoading(false); return; }
-      if (err.message?.includes('Session expired')) { setSessionExpired(true); setChatLoading(false); return; }
-      // Fall back to regular generate
+    if (projectHasFiles) {
+      // ── Chat mode: targeted modifications to existing project ──────────
+      let aiReply = '';
       try {
-        const res = await aiApi.generate({ project_id: project.project_id, prompt: text, framework: project.framework || 'phaser' });
-        if (res.project) {
-          setProject(res.project);
-          const names = Object.keys(_extractFiles(res.project));
-          if (names.length > 0) openTab(names[0]);
-          if (previewRef.current) previewRef.current.src = getPreviewUrl(res.project.project_id) + '&t=' + Date.now();
-        }
-      } catch (chatErr) {
-        if (chatErr.status === 429) showToast(chatErr.message, 'rate', chatErr.retryAfter);
+        await streamChat(
+          { project_id: project.project_id, message: text },
+          {
+            onChunk: (chunk) => {
+              aiReply += chunk;
+              setProject(prev => {
+                const conv = [...(prev.ai_conversation || [])];
+                const last = conv[conv.length - 1];
+                if (last?.role === 'assistant' && last._streaming) {
+                  conv[conv.length - 1] = { ...last, content: aiReply };
+                } else {
+                  conv.push({ role: 'assistant', content: aiReply, _streaming: true });
+                }
+                return { ...prev, ai_conversation: conv };
+              });
+            },
+            onDone: (updatedProject, filesChanged) => {
+              if (updatedProject) {
+                setProject(updatedProject);
+                if (filesChanged?.length > 0 && previewRef.current) {
+                  previewRef.current.src = getPreviewUrl(updatedProject.project_id) + '&t=' + Date.now();
+                }
+              }
+              setChatLoading(false);
+            },
+            onError: (err) => {
+              showToast(err.message || 'Chat failed');
+              setChatLoading(false);
+            },
+          }
+        );
+      } catch (err) {
+        if (err.status === 429) showToast(err.message, 'rate', err.retryAfter);
+        else if (err.status === 402) showToast(err.message, 'credits');
+        else if (err.message?.includes('Session expired')) setSessionExpired(true);
         else {
+          // Last resort: non-streaming chat fallback
           try {
             const chatRes = await aiApi.chat({ project_id: project.project_id, message: text });
             if (chatRes.project) setProject(chatRes.project);
-          } catch { setProject(prev => ({ ...prev, ai_conversation: [...(prev.ai_conversation||[]), { role:'system', content:`Error: ${err.message}` }] })); }
+          } catch {
+            setProject(prev => ({ ...prev, ai_conversation: [...(prev.ai_conversation||[]), { role:'system', content:`Error: ${err.message}` }] }));
+          }
         }
-      } finally {
         setChatLoading(false);
+      }
+    } else {
+      // ── Generate mode: create new game from prompt ──────────────────────
+      setAgentStatus({ design:{status:'pending'}, scripts:{status:'pending'}, scenes:{status:'pending'}, assets:{status:'pending'}, assembler:{status:'pending'} });
+
+      const timer = setInterval(() => {
+        setAgentStatus(prev => {
+          const next = { ...prev };
+          const order = ['design','scripts','scenes','assets','assembler'];
+          for (const a of order) {
+            if (next[a]?.status === 'pending') { next[a] = { status:'running' }; break; }
+            if (next[a]?.status === 'running')  { next[a] = { status:'complete' }; }
+          }
+          return next;
+        });
+      }, 2800);
+
+      const beforeFiles = { ..._extractFiles(project) };
+      try {
+        await streamGenerate(
+          { project_id: project.project_id, prompt: text, framework: project.framework || 'phaser' },
+          {
+            onAgent: ({ agent, status }) => {
+              clearInterval(timer);
+              setAgentStatus(prev => ({ ...prev, [agent]: { status } }));
+            },
+            onDone: (updatedProject) => {
+              if (!updatedProject) return;
+              const afterFiles = _extractFiles(updatedProject);
+              const changed = Object.keys(afterFiles).filter(f => afterFiles[f] !== beforeFiles[f]);
+              if (changed.length > 0) setDiffFiles({ before: beforeFiles, after: afterFiles, changed });
+              setProject(updatedProject);
+              setEditedFiles({});
+              setIsDirty(false);
+              const names = Object.keys(afterFiles);
+              if (names.length > 0) { openTab(names[0]); }
+              if (previewRef.current) previewRef.current.src = getPreviewUrl(updatedProject.project_id) + '&t=' + Date.now();
+              setTimeout(() => setAgentStatus({}), 2000);
+              setChatLoading(false);
+            },
+            onError: (err) => {
+              clearInterval(timer);
+              setAgentStatus({});
+              if (err.status === 429) showToast(err.message, 'rate', err.retryAfter);
+              else if (err.status === 402) showToast(err.message, 'credits');
+              else showToast(err.message);
+              setChatLoading(false);
+            },
+          }
+        );
+      } catch (err) {
+        clearInterval(timer);
+        setAgentStatus({});
+        if (err.status === 429) { showToast(err.message, 'rate', err.retryAfter); setChatLoading(false); return; }
+        if (err.status === 402) { showToast(err.message, 'credits'); setChatLoading(false); return; }
+        if (err.message?.includes('Session expired')) { setSessionExpired(true); setChatLoading(false); return; }
+        // Fall back to regular generate
+        try {
+          const res = await aiApi.generate({ project_id: project.project_id, prompt: text, framework: project.framework || 'phaser' });
+          if (res.project) {
+            setProject(res.project);
+            const names = Object.keys(_extractFiles(res.project));
+            if (names.length > 0) openTab(names[0]);
+            if (previewRef.current) previewRef.current.src = getPreviewUrl(res.project.project_id) + '&t=' + Date.now();
+          }
+        } catch {
+          setProject(prev => ({ ...prev, ai_conversation: [...(prev.ai_conversation||[]), { role:'system', content:`Error: ${err.message}` }] }));
+        } finally {
+          setChatLoading(false);
+        }
       }
     }
   };

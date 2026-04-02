@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import logging
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -823,16 +824,27 @@ The game MUST be immediately playable, visually polished, and FUN when loaded in
 
         return result
 
+    def _parse_file_changes(self, text: str) -> dict[str, str]:
+        """Extract ===FILE: name===...===END FILE=== blocks from AI response."""
+        pattern = r'===FILE:\s*([^\n=]+)===\n(.*?)===END FILE==='
+        matches = re.findall(pattern, text, re.DOTALL)
+        return {name.strip(): content.rstrip('\n') for name, content in matches}
+
     async def chat_reply(
         self,
         message: str,
         project: dict[str, Any],
         history: list[dict] | None = None,
+        user_id: str = "",
+        storage: Any = None,
     ) -> OrchestratorResult:
         system = (
             "You are an expert game development assistant for the ForgeAI platform. "
             "Help users modify, debug, optimize, and improve their game projects. "
-            "When shown existing code files, provide specific targeted changes with the full updated file content where relevant."
+            "When making code changes, output EACH modified file using this EXACT format:\n"
+            "===FILE: filename.gd===\n<full updated file content>\n===END FILE===\n"
+            "Always output the complete file content, never partial snippets when modifying files. "
+            "You may include explanatory text before or after file blocks."
         )
         project_name = project.get("name", "the project")  # noqa: F841
 
@@ -851,14 +863,54 @@ The game MUST be immediately playable, visually polished, and FUN when loaded in
                 snippets.append(f"=== {fname} ===\n{snippet}")
             files_context = "\n\nEXISTING PROJECT FILES:\n" + "\n\n".join(snippets)
 
+        # MAPL augmentation — inject user-specific past experiences and error patterns
+        mapl_context = ""
+        if user_id and storage:
+            try:
+                current_state = MemoryState(
+                    prompt=message,
+                    game_type=(project.get("design_doc") or {}).get("game_type", ""),
+                )
+                top_memories = await mapl_service.score_and_rank(
+                    current_state, storage, user_id=user_id, k=3
+                )
+                if top_memories:
+                    lines = ["\nUSER HISTORY (past errors and patterns for this user — use to avoid repeating mistakes):"]
+                    for sm in top_memories:
+                        mem = sm.memory
+                        if mem.action.action_type == "chat" and mem.reward < 0:
+                            lines.append(f"- Past error reported: {mem.state.prompt[:150]}")
+                        elif mem.outcome == Outcome.SUCCESS:
+                            lines.append(
+                                f"- Successful: {mem.state.game_type} "
+                                f"(reward: {mem.reward:.1f}, relevance: {sm.total_score:.2f})"
+                            )
+                    mapl_context = "\n".join(lines) + "\n"
+            except Exception as exc:
+                logger.debug("MAPL context retrieval skipped: %s", exc)
+
         history_text = self._format_history(history or [])
-        full_prompt = f"{system}{files_context}{history_text}\nCURRENT REQUEST: {message}"
+        full_prompt = f"{system}{files_context}{mapl_context}{history_text}\nCURRENT REQUEST: {message}"
         try:
             result = await provider_manager.generate(full_prompt, temperature=0.7)
-            return OrchestratorResult(summary="reply", payload={"reply": result.text}, usage=result.usage)
-        except Exception:
-            reply = f'Assistant noted for {project_name}: "{message}". I can generate design/code updates or profiling guidance.'
-            return OrchestratorResult(summary="reply", payload={"reply": reply}, usage=ProviderUsage())
+            file_changes = self._parse_file_changes(result.text)
+            # Strip file blocks from the visible reply so the user sees clean text
+            clean_reply = re.sub(
+                r'===FILE:\s*[^\n=]+=+\n.*?===END FILE===', '', result.text, flags=re.DOTALL
+            ).strip()
+            if file_changes and not clean_reply:
+                clean_reply = (
+                    f"Applied changes to {len(file_changes)} file(s): "
+                    + ", ".join(file_changes.keys())
+                )
+            return OrchestratorResult(
+                summary="reply",
+                payload={"reply": clean_reply or result.text, "file_changes": file_changes},
+                usage=result.usage,
+            )
+        except Exception as exc:
+            reply = f'AI unavailable: {exc}'
+            return OrchestratorResult(summary="reply", payload={"reply": reply, "file_changes": {}}, usage=ProviderUsage())
 
 
 ai_orchestrator = AIOrchestrator()

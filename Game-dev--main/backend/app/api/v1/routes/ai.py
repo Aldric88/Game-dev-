@@ -85,6 +85,49 @@ def _get_realtime(request: Request) -> RealtimeManager | None:
     return getattr(request.app.state, "realtime", None)
 
 
+_ERROR_KEYWORDS = frozenset([
+    "error", "bug", "broken", "crash", "fix", "doesn't work", "not working",
+    "failed", "exception", "undefined", "null", "issue", "wrong", "incorrect",
+    "problem", "mistake", "fail", "glitch", "weird",
+])
+
+
+def _detect_error_signal(message: str) -> bool:
+    """Return True if the user message suggests they are reporting an error."""
+    low = message.lower()
+    return any(kw in low for kw in _ERROR_KEYWORDS)
+
+
+async def _record_chat_mapl_memory(
+    storage: StorageManager,
+    user_id: str,
+    message: str,
+    project: dict,
+    reward: float,
+    outcome: Outcome,
+) -> None:
+    """Fire-and-forget: record a chat interaction as a user-specific MAPL memory."""
+    try:
+        design_doc = project.get("design_doc") or {}
+        state = MemoryState(
+            prompt=message,
+            game_type=design_doc.get("game_type", ""),
+            entity_count=len(design_doc.get("entities", [])),
+            context_features={"error_message": message[:200]},
+        )
+        action = MemoryAction(action_type="chat", temperature=0.7)
+        await mapl_service.store_memory(
+            state=state,
+            action=action,
+            reward=reward,
+            outcome=outcome,
+            user_id=user_id,
+            storage=storage,
+        )
+    except Exception as exc:
+        logger.warning("MAPL chat memory recording failed: %s", exc)
+
+
 async def _record_mapl_memory(
     storage: StorageManager,
     prompt: str,
@@ -298,23 +341,50 @@ async def chat(
     await _enforce_rate_limit(current_user["user_id"])
     await _enforce_credits(current_user["user_id"], storage)
     project = await _require_owned_project(request.project_id, storage, current_user)
+    user_id = current_user["user_id"]
 
     user_sent_at = datetime.now(timezone.utc).isoformat()
     result = await ai_orchestrator.chat_reply(
         request.message,
         project=project,
         history=project.get("ai_conversation", []),
+        user_id=user_id,
+        storage=storage,
     )
     reply = result.payload.get("reply", "")
+    file_changes: dict = result.payload.get("file_changes", {})
 
     history = _append_messages(project, request.message, reply, user_sent_at)
     usage_logs = _append_usage_log(project, "chat", result.usage)
-    update = {"ai_conversation": history, "ai_usage_logs": usage_logs}
+    update: dict = {"ai_conversation": history, "ai_usage_logs": usage_logs}
+
+    # Apply any file changes the AI produced directly into the project
+    if file_changes:
+        existing_code = dict(project.get("generated_code") or {})
+        existing_files = dict(existing_code.get("files", {}))
+        existing_files.update(file_changes)
+        existing_code["files"] = existing_files
+        update["generated_code"] = existing_code
+
     updated = await storage.update_project(request.project_id, update)
+
+    # MAPL: record error signal as user-specific negative-reward memory
+    if _detect_error_signal(request.message):
+        asyncio.create_task(_record_chat_mapl_memory(
+            storage=storage,
+            user_id=user_id,
+            message=request.message,
+            project=project,
+            reward=-0.5,
+            outcome=Outcome.FAILURE,
+        ))
 
     realtime = _get_realtime(req)
     if realtime:
-        await realtime.broadcast(request.project_id, "chat_message", {"reply": reply})
+        payload: dict = {"reply": reply}
+        if file_changes:
+            payload["files_changed"] = list(file_changes.keys())
+        await realtime.broadcast(request.project_id, "chat_message", payload)
 
     return AIChatResponse(reply=reply, project=ProjectResponse(**(updated or project)))
 
@@ -485,18 +555,42 @@ async def chat_stream(
     await _enforce_credits(current_user["user_id"], storage)
     project = await _require_owned_project(request.project_id, storage, current_user)
 
+    user_id = current_user["user_id"]
     user_sent_at = datetime.now(timezone.utc).isoformat()
     result = await ai_orchestrator.chat_reply(
         request.message,
         project=project,
         history=project.get("ai_conversation", []),
+        user_id=user_id,
+        storage=storage,
     )
     reply = result.payload.get("reply", "")
+    file_changes: dict = result.payload.get("file_changes", {})
 
     history = _append_messages(project, request.message, reply, user_sent_at)
     usage_logs = _append_usage_log(project, "chat-stream", result.usage)
-    update = {"ai_conversation": history, "ai_usage_logs": usage_logs}
+    update: dict = {"ai_conversation": history, "ai_usage_logs": usage_logs}
+
+    # Apply file changes directly into the project
+    if file_changes:
+        existing_code = dict(project.get("generated_code") or {})
+        existing_files = dict(existing_code.get("files", {}))
+        existing_files.update(file_changes)
+        existing_code["files"] = existing_files
+        update["generated_code"] = existing_code
+
     updated = await storage.update_project(request.project_id, update)
+
+    # MAPL: record error signal as user-specific negative-reward memory
+    if _detect_error_signal(request.message):
+        asyncio.create_task(_record_chat_mapl_memory(
+            storage=storage,
+            user_id=user_id,
+            message=request.message,
+            project=project,
+            reward=-0.5,
+            outcome=Outcome.FAILURE,
+        ))
 
     proj_dict = ProjectResponse(**(updated or project)).model_dump()
     proj_dict = {
@@ -511,7 +605,10 @@ async def chat_stream(
             chunk = word if i == 0 else " " + word
             yield f"data: {json.dumps({'type': 'chunk', 'content': chunk})}\n\n"
             await asyncio.sleep(0.02)
-        yield f"data: {json.dumps({'type': 'done', 'project': proj_dict}, default=str)}\n\n"
+        done_payload: dict = {"type": "done", "project": proj_dict}
+        if file_changes:
+            done_payload["files_changed"] = list(file_changes.keys())
+        yield f"data: {json.dumps(done_payload, default=str)}\n\n"
 
     return StreamingResponse(
         event_stream(),

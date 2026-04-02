@@ -193,6 +193,43 @@ export async function streamGenerate(body, { onAgent, onDone, onError } = {}) {
   }
 }
 
+/* ── Streaming AI chat (SSE via fetch) ── */
+export async function streamChat(body, { onChunk, onDone, onError } = {}) {
+  const token = localStorage.getItem('token');
+  const BASE = import.meta.env.VITE_API_BASE_URL || '';
+  const res = await fetch(`${BASE}/api/v1/ai/chat/stream`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    const error = new Error(err.detail || `Chat failed (${res.status})`);
+    error.status = res.status;
+    throw error;
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = '';
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    const parts = buf.split('\n\n');
+    buf = parts.pop();
+    for (const part of parts) {
+      const line = part.replace(/^data:\s*/, '').trim();
+      if (!line) continue;
+      try {
+        const evt = JSON.parse(line);
+        if (evt.type === 'chunk') onChunk?.(evt.content);
+        else if (evt.type === 'done') onDone?.(evt.project, evt.files_changed || []);
+        else if (evt.type === 'error') onError?.(new Error(evt.message));
+      } catch {}
+    }
+  }
+}
+
 /* ── Download ── */
 export async function downloadProjectZip(projectId) {
   const token = localStorage.getItem('token');

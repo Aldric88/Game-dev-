@@ -37,6 +37,7 @@ from app.services.github_service import search_similar_repos
 from app.services.code_extractor import fetch_reference_code
 from app.schemas.mapl import MemoryAction, MemoryState, Outcome
 from app.services.mapl_service import mapl_service
+from app.ml.intent_classifier import classify_intent
 
 logger = logging.getLogger(__name__)
 
@@ -838,13 +839,13 @@ The game MUST be immediately playable, visually polished, and FUN when loaded in
         user_id: str = "",
         storage: Any = None,
     ) -> OrchestratorResult:
-        system = (
-            "You are an expert game development assistant for the ForgeAI platform. "
-            "Help users modify, debug, optimize, and improve their game projects. "
-            "When making code changes, output EACH modified file using this EXACT format:\n"
+        # ── Intent classification (LinearSVC) ─────────────────────────────
+        intent_result = classify_intent(message)
+        intent        = intent_result["intent"]
+        system        = (
+            intent_result["system_prompt"] +
+            "\nWhen making code changes, output EACH modified file using this EXACT format:\n"
             "===FILE: filename.gd===\n<full updated file content>\n===END FILE===\n"
-            "Always output the complete file content, never partial snippets when modifying files. "
-            "You may include explanatory text before or after file blocks."
         )
         project_name = project.get("name", "the project")  # noqa: F841
 
@@ -905,12 +906,21 @@ The game MUST be immediately playable, visually polished, and FUN when loaded in
                 )
             return OrchestratorResult(
                 summary="reply",
-                payload={"reply": clean_reply or result.text, "file_changes": file_changes},
+                payload={
+                    "reply": clean_reply or result.text,
+                    "file_changes": file_changes,
+                    "intent": intent,
+                    "intent_label": intent_result["intent_label"],
+                },
                 usage=result.usage,
             )
         except Exception as exc:
             reply = f'AI unavailable: {exc}'
-            return OrchestratorResult(summary="reply", payload={"reply": reply, "file_changes": {}}, usage=ProviderUsage())
+            return OrchestratorResult(
+                summary="reply",
+                payload={"reply": reply, "file_changes": {}, "intent": intent, "intent_label": intent_result["intent_label"]},
+                usage=ProviderUsage(),
+            )
 
 
 ai_orchestrator = AIOrchestrator()

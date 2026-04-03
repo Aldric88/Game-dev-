@@ -25,6 +25,8 @@ from app.services.local_storage import save_project_files, zip_project, zip_proj
 from app.services.ml_feedback import record_game_creation
 from app.services.mapl_service import mapl_service
 from app.schemas.mapl import MemoryAction, MemoryState, Outcome
+from app.ml.prompt_scorer import score_prompt
+from app.ml.success_predictor import predict_success
 from app.services.rate_limiter import ai_rate_limiter
 from app.services.realtime import RealtimeManager
 from app.services.s3_storage import s3_storage
@@ -229,10 +231,15 @@ async def generate_design(
             confidence=1.0,   # AI-confirmed game type = fully trusted signal
         ))
 
+    prompt_score       = score_prompt(request.prompt)
+    success_prediction = predict_success(result.payload) if result.payload else {}
+
     return AIDesignResponse(
         summary=result.summary,
         design_doc=result.payload,
         project=ProjectResponse(**(updated or project)),
+        prompt_score=prompt_score,
+        success_prediction=success_prediction,
     )
 
 
@@ -386,7 +393,24 @@ async def chat(
             payload["files_changed"] = list(file_changes.keys())
         await realtime.broadcast(request.project_id, "chat_message", payload)
 
-    return AIChatResponse(reply=reply, project=ProjectResponse(**(updated or project)))
+    return AIChatResponse(
+        reply=reply,
+        project=ProjectResponse(**(updated or project)),
+        intent=result.payload.get("intent", "general"),
+        intent_label=result.payload.get("intent_label", "General"),
+    )
+
+
+@router.post("/score-prompt")
+async def score_prompt_endpoint(
+    body: dict,
+    current_user: dict = Depends(get_current_user),
+) -> JSONResponse:
+    """Lightweight endpoint — no credit cost. Returns prompt quality score 0–100."""
+    prompt = (body.get("prompt") or "").strip()
+    if not prompt:
+        return JSONResponse(content={"score": 0, "label": "Weak", "feedback": [], "features": {}})
+    return JSONResponse(content=score_prompt(prompt))
 
 
 @router.post("/godot/generate", response_model=GodotGenerateResponse)
@@ -521,7 +545,8 @@ async def generate_code_stream(
                 k: str(v) if hasattr(v, "isoformat") else v
                 for k, v in proj_dict.items()
             }
-            await queue.put({"type": "done", "project": proj_dict})
+            success_prediction = predict_success(result.payload) if result.payload else {}
+            await queue.put({"type": "done", "project": proj_dict, "success_prediction": success_prediction})
         except Exception as e:
             await queue.put({"type": "error", "message": str(e)})
         finally:
@@ -605,7 +630,12 @@ async def chat_stream(
             chunk = word if i == 0 else " " + word
             yield f"data: {json.dumps({'type': 'chunk', 'content': chunk})}\n\n"
             await asyncio.sleep(0.02)
-        done_payload: dict = {"type": "done", "project": proj_dict}
+        done_payload: dict = {
+            "type": "done",
+            "project": proj_dict,
+            "intent": result.payload.get("intent", "general"),
+            "intent_label": result.payload.get("intent_label", "General"),
+        }
         if file_changes:
             done_payload["files_changed"] = list(file_changes.keys())
         yield f"data: {json.dumps(done_payload, default=str)}\n\n"

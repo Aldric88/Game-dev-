@@ -202,6 +202,10 @@ export default function ProjectDetail() {
   const [chatInput, setChatInput] = useState('');
   const [chatLoading, setChatLoading] = useState(false);
   const [agentStatus, setAgentStatus] = useState({});
+  const [promptScore, setPromptScore] = useState(null);       // { score, label, feedback }
+  const [lastIntent, setLastIntent] = useState(null);         // { intent, intent_label }
+  const [successPrediction, setSuccessPrediction] = useState(null); // { tier, confidence, tip }
+  const scoreTimerRef = useRef(null);
   const chatEndRef = useRef(null);
   const previewRef = useRef(null);
 
@@ -225,6 +229,19 @@ export default function ProjectDetail() {
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [project?.ai_conversation?.length]);
+
+  /* Real-time prompt quality scoring (debounced 600ms, only when no files yet) */
+  useEffect(() => {
+    if (scoreTimerRef.current) clearTimeout(scoreTimerRef.current);
+    const hasF = Object.keys(_extractFiles(project || {})).length > 0;
+    if (hasF || !chatInput.trim()) { setPromptScore(null); return; }
+    scoreTimerRef.current = setTimeout(() => {
+      aiApi.scorePrompt(chatInput.trim())
+        .then(setPromptScore)
+        .catch(() => {});
+    }, 600);
+    return () => clearTimeout(scoreTimerRef.current);
+  }, [chatInput, project]);
 
   /* Monaco GDScript + theme */
   function registerGDScript(monaco) {
@@ -365,6 +382,8 @@ export default function ProjectDetail() {
     if (!text || chatLoading) return;
     setChatLoading(true);
     setChatInput('');
+    setLastIntent(null);
+    setPromptScore(null);
 
     // Optimistically add the user message to the conversation
     setProject(prev => ({ ...prev, ai_conversation: [...(prev.ai_conversation||[]), { role:'user', content:text }] }));
@@ -391,7 +410,8 @@ export default function ProjectDetail() {
                 return { ...prev, ai_conversation: conv };
               });
             },
-            onDone: (updatedProject, filesChanged) => {
+            onDone: (updatedProject, filesChanged, intent, intentLabel) => {
+              if (intent) setLastIntent({ intent, intent_label: intentLabel });
               if (updatedProject) {
                 setProject(updatedProject);
                 if (filesChanged?.length > 0 && previewRef.current) {
@@ -446,8 +466,10 @@ export default function ProjectDetail() {
               clearInterval(timer);
               setAgentStatus(prev => ({ ...prev, [agent]: { status } }));
             },
-            onDone: (updatedProject) => {
+            onDone: (updatedProject, successPred) => {
               if (!updatedProject) return;
+              if (successPred?.tier) setSuccessPrediction(successPred);
+              setLastIntent(null);
               const afterFiles = _extractFiles(updatedProject);
               const changed = Object.keys(afterFiles).filter(f => afterFiles[f] !== beforeFiles[f]);
               if (changed.length > 0) setDiffFiles({ before: beforeFiles, after: afterFiles, changed });
@@ -879,12 +901,46 @@ export default function ProjectDetail() {
               <p className="pd-empty-sub">Or import an existing codebase above — the AI will read your files and continue from where you left off.</p>
             </div>
           )}
-          {conversation.map((msg, i) => (
-            <div key={i} className={`pd-msg pd-msg-${msg.role}`}>
-              <span className="pd-msg-role">{msg.role === 'user' ? 'you' : msg.role === 'system' ? 'sys' : 'ai'}</span>
-              <div className="pd-msg-content">{msg.content}</div>
+          {conversation.map((msg, i) => {
+            const isLastAssistant = msg.role === 'assistant' && i === conversation.length - 1 && lastIntent;
+            return (
+              <div key={i} className={`pd-msg pd-msg-${msg.role}`}>
+                <span className="pd-msg-role">{msg.role === 'user' ? 'you' : msg.role === 'system' ? 'sys' : 'ai'}</span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div className="pd-msg-content">{msg.content}</div>
+                  {isLastAssistant && (
+                    <span style={{
+                      display: 'inline-block', marginTop: 4, padding: '1px 7px',
+                      fontSize: 10, borderRadius: 10, background: '#0d1a2a',
+                      color: '#478cbf', border: '1px solid #1a3a5c', letterSpacing: '0.04em',
+                    }}>
+                      {lastIntent.intent_label}
+                    </span>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+          {successPrediction?.tier && (
+            <div style={{
+              margin: '6px 4px', padding: '8px 10px', borderRadius: 6,
+              background: '#060606', border: '1px solid #1a1a1a', fontSize: 11,
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                <span style={{ fontSize: 10, color: '#555', textTransform: 'uppercase', letterSpacing: '0.08em' }}>success prediction</span>
+                <span style={{
+                  padding: '1px 7px', borderRadius: 10, fontSize: 10, fontWeight: 600,
+                  background: successPrediction.tier === 'High' ? '#0a2a0a' : successPrediction.tier === 'Medium' ? '#1a1a00' : '#2a0a0a',
+                  color: successPrediction.tier === 'High' ? '#4ade80' : successPrediction.tier === 'Medium' ? '#fbbf24' : '#f87171',
+                  border: `1px solid ${successPrediction.tier === 'High' ? '#14532d' : successPrediction.tier === 'Medium' ? '#713f12' : '#7f1d1d'}`,
+                }}>
+                  {successPrediction.tier}
+                </span>
+                <span style={{ color: '#444', fontSize: 10 }}>{Math.round((successPrediction.confidence || 0) * 100)}% confidence</span>
+              </div>
+              {successPrediction.tip && <div style={{ color: '#666', fontSize: 11, lineHeight: 1.5 }}>{successPrediction.tip}</div>}
             </div>
-          ))}
+          )}
           {chatLoading && (
             <div className="pd-msg pd-msg-assistant">
               <span className="pd-msg-role">ai</span>
@@ -894,6 +950,31 @@ export default function ProjectDetail() {
           <div ref={chatEndRef} />
         </div>
 
+        {promptScore && !hasFiles && chatInput.trim() && (
+          <div style={{ padding: '6px 12px 0', background: '#000' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
+              <span style={{ fontSize: 10, color: '#444', textTransform: 'uppercase', letterSpacing: '0.08em' }}>prompt quality</span>
+              <span style={{
+                fontSize: 10, fontWeight: 600,
+                color: promptScore.score >= 75 ? '#4ade80' : promptScore.score >= 50 ? '#fbbf24' : promptScore.score >= 30 ? '#fb923c' : '#f87171',
+              }}>
+                {promptScore.label} · {Math.round(promptScore.score)}/100
+              </span>
+            </div>
+            <div style={{ height: 3, borderRadius: 2, background: '#111', overflow: 'hidden' }}>
+              <div style={{
+                height: '100%', borderRadius: 2, transition: 'width 0.3s',
+                width: `${promptScore.score}%`,
+                background: promptScore.score >= 75 ? '#4ade80' : promptScore.score >= 50 ? '#fbbf24' : promptScore.score >= 30 ? '#fb923c' : '#f87171',
+              }} />
+            </div>
+            {promptScore.feedback?.[0] && (
+              <div style={{ fontSize: 10, color: '#444', marginTop: 3, lineHeight: 1.4 }}>
+                {promptScore.feedback[0]}
+              </div>
+            )}
+          </div>
+        )}
         <form className="pd-input-area" onSubmit={handleSend}>
           <textarea
             className="pd-input"

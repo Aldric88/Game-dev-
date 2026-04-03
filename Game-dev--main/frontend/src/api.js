@@ -156,6 +156,8 @@ export const ai = {
     request(`/api/v1/ai/code/${projectId}`, { method: 'PATCH', body: JSON.stringify({ files }) }),
   fileAction: (body) =>
     request('/api/v1/ai/file-action', { method: 'POST', body: JSON.stringify(body) }),
+  scorePrompt: (prompt) =>
+    request('/api/v1/ai/score-prompt', { method: 'POST', body: JSON.stringify({ prompt }) }),
 };
 
 /* ── Streaming AI generate (SSE via fetch) ── */
@@ -186,7 +188,7 @@ export async function streamGenerate(body, { onAgent, onDone, onError } = {}) {
       try {
         const evt = JSON.parse(line);
         if (evt.type === 'agent') onAgent?.(evt);
-        else if (evt.type === 'done') onDone?.(evt.project);
+        else if (evt.type === 'done') onDone?.(evt.project, evt.success_prediction || null);
         else if (evt.type === 'error') onError?.(new Error(evt.message));
       } catch {}
     }
@@ -223,7 +225,7 @@ export async function streamChat(body, { onChunk, onDone, onError } = {}) {
       try {
         const evt = JSON.parse(line);
         if (evt.type === 'chunk') onChunk?.(evt.content);
-        else if (evt.type === 'done') onDone?.(evt.project, evt.files_changed || []);
+        else if (evt.type === 'done') onDone?.(evt.project, evt.files_changed || [], evt.intent, evt.intent_label);
         else if (evt.type === 'error') onError?.(new Error(evt.message));
       } catch {}
     }

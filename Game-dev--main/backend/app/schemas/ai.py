@@ -14,6 +14,8 @@ class AIDesignResponse(BaseModel):
     summary: str = ""
     design_doc: dict = Field(default_factory=dict)
     project: Optional[ProjectResponse] = None
+    prompt_score: dict = Field(default_factory=dict)       # from PromptScorer
+    success_prediction: dict = Field(default_factory=dict) # from SuccessPredictor
 
 
 class AICodeRequest(BaseModel):
@@ -35,6 +37,8 @@ class AIChatRequest(BaseModel):
 class AIChatResponse(BaseModel):
     reply: str = ""
     project: Optional[ProjectResponse] = None
+    intent: str = ""        # from IntentClassifier e.g. "fix_bug"
+    intent_label: str = ""  # human label e.g. "Fix Bug"
 
 
 class GodotGenerateRequest(BaseModel):
